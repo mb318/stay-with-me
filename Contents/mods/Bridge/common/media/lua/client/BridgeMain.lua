@@ -120,6 +120,8 @@ local PATH_EVERY = 30
 local FOLLOW_DIST = 2.5
 local BODY_VAR = "NotAloneBody"
 Bridge.BODY_VAR = BODY_VAR
+local HEALTH_BUFFER = 1000
+Bridge.HEALTH_BUFFER = HEALTH_BUFFER
 
 local function log(text)
     if BridgeLog ~= nil and BridgeLog.on() then print("[Bridge] " .. tostring(text)) end
@@ -182,13 +184,13 @@ function Bridge.alive()
         local killed = true
         pcall(function() killed = Bridge.body:isOnKillDone() or Bridge.body:isOnDeathDone() end)
         if not killed then
-            pcall(function() Bridge.body:setHealth(1) end)
+            pcall(function() Bridge.body:setHealth(HEALTH_BUFFER) end)
 
             pcall(function() local bd = Bridge.body:getBodyDamage() if bd ~= nil and bd:getOverallBodyHealth() <= 0 then bd:RestoreToFullHealth() end end)
             pcall(function() dead = Bridge.body:isDead() end)
             if not dead and Bridge.time - (Bridge.hpLogAt or -99999) >= 60 then
                 Bridge.hpLogAt = Bridge.time
-                log("health 0 without a kill (set by something else): back to 1, same body")
+                log("health 0 without a kill (set by something else): back to " .. tostring(HEALTH_BUFFER) .. ", same body")
             end
         end
     end
@@ -466,6 +468,7 @@ local function humanize(body)
     pcall(function() body:setShootable(false) end)
     pcall(function() body:setInvulnerable(true) end)
     pcall(function() body:setGodMod(true, true) end)
+    pcall(function() body:setHealth(HEALTH_BUFFER) end)
     pcall(function() body:getInventory():setCapacity(15) end)
     pcall(function() body:getInventory():setExplored(true) end)
 end
@@ -2249,11 +2252,11 @@ function Bridge.keepHealth(body)
     local hp, dead = nil, false
     pcall(function() hp = body:getHealth() end)
     pcall(function() dead = body:isDead() or body:isOnKillDone() end)
-    if hp == nil or dead or hp >= 1 then return false end
-    pcall(function() body:setHealth(1) end)
+    if hp == nil or dead or hp >= HEALTH_BUFFER then return false end
+    pcall(function() body:setHealth(HEALTH_BUFFER) end)
     if hp <= 0 or Bridge.time - (Bridge.hpLogAt or -99999) >= 600 then
         Bridge.hpLogAt = Bridge.time
-        log(string.format("health %.2f set by something else, back to 1", hp))
+        log(string.format("health %.2f set by something else, back to %d", hp, HEALTH_BUFFER))
     end
     return true
 end
@@ -3286,6 +3289,7 @@ local function applyLook(z, visuals, rec, who)
     pcall(function() z:setShootable(false) end)
     pcall(function() z:setInvulnerable(true) end)
     pcall(function() if not z:isGodMod() then z:setGodMod(true, true) end end)
+    pcall(function() if z:getHealth() < HEALTH_BUFFER then z:setHealth(HEALTH_BUFFER) end end)
 
 
 

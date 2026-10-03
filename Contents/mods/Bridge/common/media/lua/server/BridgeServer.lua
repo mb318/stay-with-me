@@ -185,18 +185,35 @@ end
 
 
 
+local TRIP_IGNORE = 1000000000
+local trippingOn = nil
+
+local function tripModOn()
+    if trippingOn == nil then
+        trippingOn = false
+        pcall(function()
+            local mods = getActivatedMods()
+            trippingOn = mods:contains("TrippingZombies") or mods:contains("\\TrippingZombies")
+        end)
+        if trippingOn then log("Tripping Zombies detected: companion trip suppression on") end
+    end
+    return trippingOn
+end
+
 local function markHuman(body)
     pcall(function() body:setVariable("SurvivorNPC", true) end)
     pcall(function() body:getModData().notAloneBody = true end)
 
 
     pcall(function() body:getModData().ST_Ignore = true end)
+    pcall(function() body:getModData().tzCooldown = TRIP_IGNORE end)
 end
 
 local function unmarkHuman(body)
     pcall(function() body:clearVariable("SurvivorNPC") end)
     pcall(function() body:getModData().notAloneBody = nil end)
     pcall(function() body:getModData().ST_Ignore = nil end)
+    pcall(function() body:getModData().tzCooldown = nil end)
 end
 
 
@@ -1929,6 +1946,12 @@ local function onTick()
         if on ~= BridgeServer.verbose then
             BridgeServer.verbose = on
             log("verbose log " .. (on and "on" or "off"))
+        end
+    end
+
+    if BridgeServer.newSecond and sec % 10 == 0 and tripModOn() then
+        for _, b in pairs(BridgeServer.bodies) do
+            pcall(function() b:getModData().tzCooldown = TRIP_IGNORE end)
         end
     end
 
