@@ -247,13 +247,19 @@ function BridgeMenu.fill(context, playerNum, fromIcon)
     actions:addOption(tr("Goodbye"), nil, BridgeMenu.onGoodbye)
 
     local combatOption = context:addOption(tr("Combat"))
-    local combat = ISContextMenu:getNew(context)
-    context:addSubMenu(combatOption, combat)
-    local combatMode = BridgeData.combatOf(st)
-    for _, entry in ipairs({ { "bodyguard", "CombatBodyguard" }, { "escort", "CombatEscort" },
-        { "aggressive", "CombatAggressive" } }) do
-        local o = combat:addOption(tr(entry[2]), entry[1], BridgeMenu.onCombat)
-        if combatMode == entry[1] then o.isDisabled = true end
+    local guard = false
+    pcall(function() if BridgeFight ~= nil then guard = BridgeFight.guardOnly end end)
+    if guard then
+        combatOption.isDisabled = true
+    else
+        local combat = ISContextMenu:getNew(context)
+        context:addSubMenu(combatOption, combat)
+        local combatMode = BridgeData.combatOf(st)
+        for _, entry in ipairs({ { "bodyguard", "CombatBodyguard" }, { "escort", "CombatEscort" },
+            { "aggressive", "CombatAggressive" } }) do
+            local o = combat:addOption(tr(entry[2]), entry[1], BridgeMenu.onCombat)
+            if combatMode == entry[1] then o.isDisabled = true end
+        end
     end
 
     if not BridgeData.KEEP_ON then return end

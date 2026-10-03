@@ -26,10 +26,7 @@ local function ours(z)
     if Bridge ~= nil and Bridge.body ~= nil and z == Bridge.body then return true end
     local marked = false
     pcall(function() marked = z.getVariableBoolean ~= nil and z:getVariableBoolean("NotAloneBody") == true end)
-    if marked then return true end
-    local md = false
-    pcall(function() md = z.getModData ~= nil and z:getModData().ST_Ignore == true end)
-    return md
+    return marked
 end
 BridgeGun.ours = ours
 
