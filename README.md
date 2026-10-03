@@ -9,6 +9,8 @@ A companion mod for Project Zomboid (Build 42). She walks with you, fights besid
 
 `Contents/mods/Bridge` is the mod exactly as it ships on the Workshop. Lua lives in `common/media/lua` (`client`, `server`, `shared`).
 
+The blank lines in the Lua files are intentional: comments are stripped at build time and replaced with empty lines, so line numbers match error logs and the development source.
+
 ## Bugs and fixes
 
 Bug reports are welcome in Issues. Pull requests are welcome too. Every change is tested in game before it is merged, so a merge can take time.
