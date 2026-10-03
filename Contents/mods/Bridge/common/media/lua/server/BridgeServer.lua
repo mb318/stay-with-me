@@ -904,6 +904,11 @@ BridgeServer.Commands.state = function(player, args)
         changed = true
     end
 
+    if args.combat ~= nil and BridgeData.COMBAT_MODES[args.combat] and rec.combat ~= args.combat then
+        rec.combat = args.combat
+        changed = true
+    end
+
     if args.left ~= nil then
         local left = args.left == true or nil
         if rec.left ~= left then

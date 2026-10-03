@@ -4,16 +4,11 @@
 
 BridgeFight = BridgeFight or {}
 
-local ENGAGE_RED = 3.0
-
-
 local PRONE_WEIGHT = 2.0
-local ENGAGE_SELF = 2.5
-local GIVEUP_RED = 4.0
+
 
 local TIRED_SAY = 0.5
 local RESTED_SAY = 0.2
-local TARGET_MAX = 6.0
 
 local ATTACK_TIME = 28
 local SWING_LEN = 60
@@ -102,7 +97,6 @@ local TIRED_MISS = 15
 local TIRED_DAMAGE = 0.25
 local PICK_EVERY = 10
 local APPROACH_MAX = 150
-local APPROACH_DIST = 4.5
 local BLACKLIST_TICKS = 900
 
 BridgeFight.enabled = true
@@ -394,6 +388,8 @@ local function hitTarget(body, item, victim)
     BridgeFight.lastReaction = reaction
     victim:Hit(item, fake, dmg, false, 1, false)
 
+    pcall(function() BridgeCallout.kill(victim) end)
+
     tire(item, rawDmg, hpBefore, isProne(victim), body)
     pcall(function() victim:playSound(item:getZombieHitSound()) end)
 
@@ -429,8 +425,16 @@ BridgeFight.visible = visible
 
 
 
-function BridgeFight.threat(z, body, red)
-    local d = BridgeFight.guardOnly and dist(z, body) or dist(z, red)
+function BridgeFight.mode()
+    if BridgeFight.guardOnly then return BridgeData.COMBAT.bodyguard end
+    return BridgeData.COMBAT[BridgeData.combatOf(Bridge.store)] or BridgeData.COMBAT.bodyguard
+end
+
+
+function BridgeFight.threat(z, body, red, mode)
+    mode = mode or BridgeFight.mode()
+    local bySelf = BridgeFight.guardOnly or mode.rank == "self"
+    local d = bySelf and dist(z, body) or dist(z, red)
     local prone = false
     pcall(function() prone = isProne(z) or z:isCrawling() end)
     return d + (prone and PRONE_WEIGHT or 0)
@@ -446,7 +450,8 @@ local function barrierSide(z, body)
 end
 
 
-local function pickTarget(body, red)
+local function pickTarget(body, red, mode)
+    mode = mode or BridgeFight.mode()
     local list = getCell():getZombieList()
     local best, bestD = nil, math.huge
     for i = 0, list:size() - 1 do
@@ -466,7 +471,7 @@ local function pickTarget(body, red)
 
 
             local broke = BARRIER_STATE[b.st] and not BARRIER_STATE[st]
-            local came = (z:getX() - b.x) ^ 2 + (z:getY() - b.y) ^ 2 > 1.0 and dist(z, red) < ENGAGE_RED
+            local came = (z:getX() - b.x) ^ 2 + (z:getY() - b.y) ^ 2 > 1.0 and dist(z, red) < mode.engageRed
                 and not wallBetween(body, z)
             if b.untilT <= Bridge.time or broke or came then
                 BridgeFight.blacklist[z] = nil
@@ -492,9 +497,9 @@ local function pickTarget(body, red)
             and math.abs(z:getZ() - red:getZ()) < 0.8 and not BridgeData.harmless(z) and visible(z, red) then
             local dRed = dist(z, red)
             local dSelf = dist(z, body)
-            local near = dSelf < ENGAGE_SELF or (not BridgeFight.guardOnly and dRed < ENGAGE_RED)
+            local near = dSelf < mode.engageSelf or (not BridgeFight.guardOnly and dRed < mode.engageRed)
             if near then
-                local score = BridgeFight.threat(z, body, red)
+                local score = BridgeFight.threat(z, body, red, mode)
                 if score < bestD then best, bestD = z, score end
             end
         end
@@ -512,7 +517,8 @@ function BridgeFight.ownerRisen(z, red)
     return risen == true
 end
 
-local function validTarget(z, body, red)
+local function validTarget(z, body, red, mode)
+    mode = mode or BridgeFight.mode()
     if z == nil then return false end
     if BridgeFight.ownerRisen(z, red) then return false end
     local ok, alive = pcall(function() return z:isAlive() and z:getHealth() > 0 and not z:isOnKillDone() end)
@@ -535,12 +541,16 @@ local function validTarget(z, body, red)
         if Bridge.time - BridgeFight.unseenSince > 60 then
             BridgeFight.unseenSince = nil
             BridgeFight.info = "target out of sight"
+            pcall(function() BridgeCallout.lostTarget() end)
             return false
         end
     end
     if BridgeFight.guardOnly then
-        if dist(z, body) > TARGET_MAX then return false end
-    elseif dist(z, red) > TARGET_MAX then return false end
+        if dist(z, body) > BridgeData.COMBAT.bodyguard.targetMax then return false end
+    else
+        local d = mode.rank == "self" and dist(z, body) or dist(z, red)
+        if d > mode.targetMax then return false end
+    end
     return true
 end
 
@@ -611,6 +621,7 @@ function BridgeFight.update(body)
     if not BridgeFight.enabled then rest(false) return false end
     local red = BridgeData.owner()
     if red == nil then return false end
+    local mode = BridgeFight.mode()
     watchCrawlers(body, red)
 
 
@@ -620,8 +631,11 @@ function BridgeFight.update(body)
     if BridgeFight.target == nil and BridgeFight.state ~= "swing" then rest(false) end
 
 
-    if not BridgeFight.guardOnly and dist(body, red) > GIVEUP_RED and BridgeFight.state ~= "swing" then
-        if BridgeFight.target ~= nil then BridgeFight.info = "gave up: player far" end
+    if not BridgeFight.guardOnly and dist(body, red) > mode.leash and BridgeFight.state ~= "swing" then
+        if BridgeFight.target ~= nil then
+            BridgeFight.info = "gave up: player far"
+            pcall(function() BridgeCallout.breakOff() end)
+        end
         BridgeFight.target = nil
         BridgeFight.state = "idle"
         return false
@@ -656,7 +670,7 @@ function BridgeFight.update(body)
             BridgeFight.hit = true
             pcall(function() body:setVariable(HIT_VAR, false) end)
             vlog(string.format("hit moment: %s at %.2f s of the swing", mark and "animation mark" or "time (no mark)", age / 60))
-            if validTarget(t, body, red) then
+            if validTarget(t, body, red, mode) then
                 local ok, res = pcall(function() return hitTarget(body, weapon(body), t) end)
                 BridgeFight.info = ok and ("swing " .. tostring(res)) or ("hit error: " .. tostring(res))
                 if not ok or res ~= "hit" then
@@ -669,10 +683,11 @@ function BridgeFight.update(body)
             end
         end
 
-        if BridgeFight.hit and not BridgeFight.guardOnly and dist(body, red) > GIVEUP_RED then
+        if BridgeFight.hit and not BridgeFight.guardOnly and dist(body, red) > mode.leash then
             BridgeFight.target = nil
             BridgeFight.state = "idle"
             BridgeFight.info = "gave up mid-swing: player far"
+            pcall(function() BridgeCallout.breakOff() end)
             return false
         end
         if age >= swingLen then
@@ -684,19 +699,19 @@ function BridgeFight.update(body)
 
 
     if BridgeFight.target ~= nil and (Bridge.time - BridgeFight.lastPick) >= PICK_EVERY
-        and validTarget(BridgeFight.target, body, red) then
+        and validTarget(BridgeFight.target, body, red, mode) then
         BridgeFight.lastPick = Bridge.time
-        local okP, z = pcall(function() return pickTarget(body, red) end)
+        local okP, z = pcall(function() return pickTarget(body, red, mode) end)
         local cur = BridgeFight.target
         if okP and z ~= nil and z ~= cur
-            and BridgeFight.threat(z, body, red) + 0.5 < BridgeFight.threat(cur, body, red) then
-            vlog(string.format("target switched: threat %.1f -> %.1f (dred %.1f -> %.1f)", BridgeFight.threat(cur, body, red),
-                BridgeFight.threat(z, body, red), dist(cur, red), dist(z, red)))
+            and BridgeFight.threat(z, body, red, mode) + 0.5 < BridgeFight.threat(cur, body, red, mode) then
+            vlog(string.format("target switched: threat %.1f -> %.1f (dred %.1f -> %.1f)", BridgeFight.threat(cur, body, red, mode),
+                BridgeFight.threat(z, body, red, mode), dist(cur, red), dist(z, red)))
             BridgeFight.target = z
             BridgeFight.state = "idle"
         end
     end
-    if not validTarget(BridgeFight.target, body, red) then
+    if not validTarget(BridgeFight.target, body, red, mode) then
         BridgeFight.target = nil
 
 
@@ -705,11 +720,12 @@ function BridgeFight.update(body)
         BridgeFight.state = "idle"
         if (Bridge.time - BridgeFight.lastPick) < PICK_EVERY then return false end
         BridgeFight.lastPick = Bridge.time
-        local ok, z = pcall(function() return pickTarget(body, red) end)
+        local ok, z = pcall(function() return pickTarget(body, red, mode) end)
         if not ok then BridgeFight.info = "pick error: " .. tostring(z); return false end
         BridgeFight.target = z
         if z == nil then return false end
         BridgeFight.info = "target picked"
+        pcall(function() BridgeCallout.engage(z) end)
 
 
 
@@ -738,7 +754,7 @@ function BridgeFight.update(body)
     local item = weapon(body)
     local range = item:getMaxRange()
     local d = dist(body, t)
-    if d > APPROACH_DIST then
+    if d > mode.approach then
 
         BridgeFight.target = nil
         BridgeFight.state = "idle"

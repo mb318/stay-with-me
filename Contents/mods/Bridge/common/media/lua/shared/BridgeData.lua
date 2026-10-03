@@ -263,13 +263,13 @@ BridgeData.KEEP_SIDES = { behind = true, left = true, right = true }
 
 
 
-BridgeData.KEEP_SIDES_ON = false
+BridgeData.KEEP_SIDES_ON = true
 
 
 
 
 
-BridgeData.KEEP_ON = false
+BridgeData.KEEP_ON = true
 
 function BridgeData.keepAllowed(side)
     if side == "behind" then return true end
@@ -283,6 +283,22 @@ end
 
 function BridgeData.farOf(rec)
     return BridgeData.KEEP_ON == true and rec ~= nil and rec.far == true
+end
+
+
+BridgeData.COMBAT_MODES = { bodyguard = true, escort = true, aggressive = true }
+BridgeData.DEFAULT_COMBAT = "bodyguard"
+
+
+BridgeData.COMBAT = {
+    bodyguard = { rank = "player", engageSelf = 2.5, engageRed = 3.0, targetMax = 6.0, approach = 4.5, leash = 4.0 },
+    escort = { rank = "self", engageSelf = 3.0, engageRed = 5.5, targetMax = 9.0, approach = 7.0, leash = 7.0 },
+    aggressive = { rank = "self", engageSelf = 4.5, engageRed = 11.0, targetMax = 13.0, approach = 12.0, leash = 12.0 },
+}
+
+function BridgeData.combatOf(rec)
+    if rec ~= nil and BridgeData.COMBAT_MODES[rec.combat] then return rec.combat end
+    return BridgeData.DEFAULT_COMBAT
 end
 
 

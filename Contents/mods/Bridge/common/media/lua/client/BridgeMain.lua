@@ -1812,6 +1812,18 @@ function Bridge.setFar(far)
 end
 
 
+function Bridge.setCombat(mode)
+    if not BridgeData.COMBAT_MODES[mode] then return "unknown combat " .. tostring(mode) end
+    local st = Bridge.store
+    if st ~= nil then st.combat = mode end
+    pcall(function() BridgeFight.reset(Bridge.body) end)
+    if Bridge.mp then
+        pcall(function() sendClientCommand(BridgeData.owner(), "Bridge", "state", { combat = mode }) end)
+    end
+    return "combat=" .. mode
+end
+
+
 function Bridge.applyStoredMode()
     local mode = BridgeData.modeOf(Bridge.store)
     Bridge.mode = mode
@@ -2179,6 +2191,13 @@ end
 function Bridge.onHitZombie(zombie, attacker, bodyPart, weapon)
     local ok, isBody = pcall(function() return zombie:getVariableBoolean(BODY_VAR) end)
     if ok then pcall(function() Bridge.spyHit(zombie, attacker, isBody and not reusedBody(zombie)) end) end
+    if ok and not isBody and not reusedBody(zombie) then
+        pcall(function()
+            if attacker ~= nil and instanceof(attacker, "IsoPlayer") and attacker == BridgeData.owner() then
+                BridgeCallout.playerStrike(zombie)
+            end
+        end)
+    end
     if not ok or not isBody or reusedBody(zombie) then return end
     pcall(function() zombie:setAvoidDamage(true) end)
     if instanceof(attacker, "IsoPlayer") then
@@ -2857,6 +2876,9 @@ local function updateZombieBody(body)
 
         local okMom, errMom = pcall(function() BridgeMoments.update(body) end)
         if not okMom and BridgeMoments ~= nil then BridgeMoments.info = "error: " .. tostring(errMom) end
+
+        local okCall, errCall = pcall(function() BridgeCallout.update(body) end)
+        if not okCall and BridgeCallout ~= nil then BridgeCallout.info = "error: " .. tostring(errCall) end
     end
 
 
@@ -3775,7 +3797,7 @@ end
 
 local SAFE_COMMANDS = { say = true, voice = true, quiet = true, come = true, follow = true, go = true, wait = true,
     rest = true, stop = true, mode = true, sit = true, stand = true, sleep = true, anim = true, walk = true,
-    keep = true, far = true, ["goto"] = true, trace = true, sq = true, doors = true, status = true,
+    keep = true, far = true, combat = true, ["goto"] = true, trace = true, sq = true, doors = true, status = true,
     items = true, wounds = true, heal = true, wash = true, name = true, call = true, goodbye = true, menu = true,
     lose = true, despawn = true }
 
@@ -4018,6 +4040,7 @@ function Bridge.run(line)
 
     if cmd == "keep" then return Bridge.setKeep(parts[3]) end
     if cmd == "far" then return Bridge.setFar(parts[3] == "on") end
+    if cmd == "combat" then return Bridge.setCombat(parts[3]) end
     if cmd == "set" then return BridgeMove.set(parts[3], parts[4]) end
     if cmd == "heal" then
         if not Bridge.alive() or Bridge.kind ~= "zombie" then return "no body" end
@@ -4699,6 +4722,7 @@ function Bridge.writeState()
             add("rel", string.format("f=%d r=%d days=%d hours=%.1f gain=%d/%d", r.f, r.r, r.days, r.hours, r.gainF, r.gainR))
             add("social", BridgeSocial.info)
             add("moments", BridgeMoments.info)
+            add("callout", BridgeCallout.info)
             add("mood", BridgeMood.info)
         end)
         add("pose", Bridge.pose and Bridge.pose.anim or "none")
