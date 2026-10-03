@@ -1,0 +1,422 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+BridgeData = BridgeData or {}
+BridgeData.KEY = "NotAlone"
+BridgeData.OLD_KEY = "BridgeRin"
+BridgeData.LOCAL = "local"
+BridgeData.DEFAULT_NAME = "Rin"
+BridgeData.NAME_MAX = 20
+BridgeData.MODES = { follow = true, wait = true, rest = true }
+
+
+
+
+
+function BridgeData.overheadOk(text)
+    if text == nil then return false end
+    text = tostring(text)
+    local plain = true
+    for i = 1, #text do
+        if string.byte(text, i) > 127 then plain = false break end
+    end
+    if plain then return true end
+    local ok = false
+    pcall(function() ok = getTextOrNull("IGUI_NotAlone_OverheadCyrillic") == "1" end)
+    return ok
+end
+
+
+
+
+
+
+function BridgeData.owner()
+    local p = nil
+    if getSpecificPlayer ~= nil then p = getSpecificPlayer(0) end
+    if p == nil then p = getPlayer() end
+    return p
+end
+
+
+
+
+
+
+
+
+
+function BridgeData.dragged(z)
+    local yes = false
+    pcall(function() yes = z:isReanimatedForGrappleOnly() == true end)
+    return yes
+end
+
+
+
+
+
+
+
+
+BridgeData.FRIENDLY_VARS = BridgeData.FRIENDLY_VARS or { "RNPCFriendly" }
+
+function BridgeData.friendlyNpc(z)
+    local yes = false
+    pcall(function()
+        local vars = BridgeData.FRIENDLY_VARS
+        for i = 1, #vars do
+            if z:getVariableBoolean(vars[i]) then yes = true return end
+        end
+    end)
+    return yes
+end
+
+
+
+
+
+
+
+
+BridgeData.FOREIGN_MODDATA = BridgeData.FOREIGN_MODDATA or { "ProjectALifeOwned", "ProjectALifeActor" }
+
+local function markedForeign(z)
+    local yes = false
+    pcall(function()
+        local data = z:getModData()
+        if data == nil then return end
+        local keys = BridgeData.FOREIGN_MODDATA
+        for i = 1, #keys do
+            if data[keys[i]] == true then yes = true return end
+        end
+    end)
+    return yes
+end
+
+
+
+
+
+
+
+
+
+
+
+function BridgeData.banditBrain(z, deep)
+    if type(BanditBrain) ~= "table" or type(BanditBrain.Get) ~= "function" then return false, nil end
+    local npc, brain = false, nil
+    pcall(function()
+        if z:getVariableBoolean("Bandit") then
+            npc = true
+            brain = BanditBrain.Get(z)
+        end
+        if type(brain) ~= "table" and (deep or isServer()) and type(GetBanditClusterData) == "function"
+            and type(BanditUtils) == "table" and type(BanditUtils.GetZombieID) == "function" then
+            local id = BanditUtils.GetZombieID(z)
+            local gmd = GetBanditClusterData(id)
+            if type(gmd) == "table" and type(gmd[id]) == "table" then
+                npc = true
+                brain = gmd[id]
+            end
+        end
+    end)
+    if type(brain) ~= "table" then brain = nil end
+    return npc, brain
+end
+
+
+
+
+function BridgeData.bandit(z, deep)
+    local npc, brain = BridgeData.banditBrain(z, deep)
+    local hostile = nil
+    if brain ~= nil then hostile = brain.hostile == true or brain.hostileP == true end
+    return npc, hostile
+end
+
+
+
+function BridgeData.foreign(z)
+    if markedForeign(z) then return true end
+    local npc = BridgeData.banditBrain(z, true)
+    return npc
+end
+
+
+
+
+
+
+
+
+
+function BridgeData.alifeHostile(z)
+    local answer = nil
+    pcall(function()
+        local mod = ProjectALife
+        if type(mod) ~= "table" then return end
+        local player = BridgeData.owner()
+        local data = z:getModData()
+        local uid = data ~= nil and data.ProjectALifeUID or nil
+        if type(uid) == "string" and type(mod.ActorRegistry) == "table" and type(mod.Relations) == "table"
+            and type(mod.Relations.hostileToPlayer) == "function" then
+            local read = mod.ActorRegistry.peek or mod.ActorRegistry.read
+            local actor = type(read) == "function" and read(uid) or nil
+            if type(actor) == "table" then
+                answer = mod.Relations.hostileToPlayer(actor, player) == true
+                return
+            end
+        end
+        if type(mod.Reputation) == "table" and type(mod.Reputation.statusFor) == "function" then
+            local status = mod.Reputation.statusFor(player, z)
+            if type(status) == "string" then answer = status == "hostile" end
+        end
+    end)
+    return answer
+end
+
+
+
+
+
+
+
+function BridgeData.foreignPeaceful(z)
+    local npc, hostile = BridgeData.bandit(z)
+    if npc then return hostile ~= true end
+    if not markedForeign(z) then return false end
+    return BridgeData.alifeHostile(z) ~= true
+end
+
+
+
+
+
+function BridgeData.harmless(z)
+    return BridgeData.dragged(z) or BridgeData.friendlyNpc(z) or BridgeData.foreignPeaceful(z)
+end
+
+
+function BridgeData.me()
+    if isClient() then
+        local p = BridgeData.owner()
+        if p == nil then return nil end
+        return p:getUsername()
+    end
+    return BridgeData.LOCAL
+end
+
+
+
+function BridgeData.cleanName(text)
+    if text == nil then return nil end
+    text = tostring(text)
+    local out = {}
+    for i = 1, #text do
+        local c = string.byte(text, i)
+        if c >= 32 and c ~= 127 then out[#out + 1] = string.sub(text, i, i) end
+    end
+    text = table.concat(out)
+    text = string.gsub(text, "^%s+", "")
+    text = string.gsub(text, "%s+$", "")
+    if #text > BridgeData.NAME_MAX then text = string.sub(text, 1, BridgeData.NAME_MAX) end
+    if text == "" then return nil end
+    return text
+end
+
+function BridgeData.nameOf(rec)
+    if rec ~= nil and rec.name ~= nil and rec.name ~= "" then return rec.name end
+    return BridgeData.DEFAULT_NAME
+end
+
+function BridgeData.modeOf(rec)
+    if rec ~= nil and BridgeData.MODES[rec.mode] then return rec.mode end
+    return "follow"
+end
+
+
+
+
+
+BridgeData.KEEP_SIDES = { behind = true, left = true, right = true }
+
+
+
+
+
+
+
+
+
+
+
+BridgeData.KEEP_SIDES_ON = false
+
+
+
+
+
+BridgeData.KEEP_ON = false
+
+function BridgeData.keepAllowed(side)
+    if side == "behind" then return true end
+    return BridgeData.KEEP_SIDES_ON == true and BridgeData.KEEP_SIDES[side] == true
+end
+
+function BridgeData.keepOf(rec)
+    if BridgeData.KEEP_ON and rec ~= nil and BridgeData.keepAllowed(rec.keep) then return rec.keep end
+    return "behind"
+end
+
+function BridgeData.farOf(rec)
+    return BridgeData.KEEP_ON == true and rec ~= nil and rec.far == true
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+BridgeData.OPTIONS = { autoHeal = true, hitMatters = false, gifts = true, redKit = true, mood = true }
+BridgeData.DEFAULT_HAIR = "Grungey02"
+BridgeData.HAIR_MAX = 40
+
+function BridgeData.optionOf(rec, key)
+    if BridgeData.OPTIONS[key] == nil then return false end
+    if rec ~= nil and rec[key] ~= nil then return rec[key] == true end
+    return BridgeData.OPTIONS[key]
+end
+
+
+function BridgeData.cleanHair(text)
+    if type(text) ~= "string" or text == "" or #text > BridgeData.HAIR_MAX then return nil end
+    if string.find(text, "[^%w_]") ~= nil then return nil end
+    return text
+end
+
+function BridgeData.hairOf(rec)
+    local hair = rec ~= nil and BridgeData.cleanHair(rec.hair) or nil
+    return hair or BridgeData.DEFAULT_HAIR
+end
+
+
+function BridgeData.wants(rec)
+    return rec ~= nil and rec.want ~= false
+end
+
+
+
+function BridgeData.world(owner)
+    local md = ModData.getOrCreate(BridgeData.KEY)
+    if md.players == nil then md.players = {} end
+
+    if not md.migrated and not isClient() then
+        md.migrated = true
+        pcall(function()
+            if not ModData.exists(BridgeData.OLD_KEY) then return end
+            local old = ModData.get(BridgeData.OLD_KEY)
+            if old == nil then return end
+            local who = old.owner or owner
+            if who == nil then return end
+            local rec = md.players[who] or {}
+            if rec.items == nil and old.items ~= nil then
+                rec.items = old.items
+                rec.saved = old.saved
+            end
+            if rec.want == nil and old.want ~= nil then rec.want = old.want end
+            rec.lastX, rec.lastY, rec.lastZ = old.lastX, old.lastY, old.lastZ
+
+            rec.oldBodyId = old.bodyId
+            md.players[who] = rec
+        end)
+    end
+    return md
+end
+
+
+function BridgeData.ownerOf(md, pid)
+    if md == nil or md.players == nil or pid == nil then return nil, nil end
+    for who, rec in pairs(md.players) do
+        if rec.bodyId == pid then return who, rec end
+    end
+    return nil, nil
+end
+
+
+
+
+
+
+
+
+
+
+BridgeData.REL_KEYS = { f = { -100, 100 }, r = { 0, 100 }, days = { 0, 100000 }, hours = { 0, 24 },
+    day = { 0, 1000000 }, gainF = { -100, 100 }, gainR = { -100, 100 }, giftAt = { 0, 100000000 },
+    seen = { 0, 100000000 }, askAt = { 0, 100000000 }, healAt = { 0, 100000000 },
+    dressF = { 0, 100 }, dressR = { 0, 100 } }
+
+
+function BridgeData.relOf(rec)
+    if rec == nil then return nil end
+    if type(rec.rel) ~= "table" then rec.rel = {} end
+    local rel = rec.rel
+    for k, _ in pairs(BridgeData.REL_KEYS) do
+        if type(rel[k]) ~= "number" then rel[k] = 0 end
+    end
+    return rel
+end
+
+
+
+function BridgeData.cleanRel(t)
+    if type(t) ~= "table" then return nil end
+    local out = {}
+    for k, range in pairs(BridgeData.REL_KEYS) do
+        local v = tonumber(t[k])
+        if v ~= nil and v == v then
+            if v < range[1] then v = range[1] end
+            if v > range[2] then v = range[2] end
+            out[k] = v
+        else
+            out[k] = 0
+        end
+    end
+    return out
+end
+
+
+function BridgeData.relTier(rel)
+    local f = rel and rel.f or 0
+    if f < 0 then return "Cold" end
+    if f < 20 then return "Known" end
+    if f < 45 then return "Pal" end
+    if f < 75 then return "Friend" end
+    return "Close"
+end
+
+if BridgeLog ~= nil and BridgeLog.on() then print("[BridgeData] loaded") end

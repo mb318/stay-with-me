@@ -1,0 +1,24 @@
+module Base
+{
+    item Jacket_SheepSkin_Navy
+    {
+        DisplayCategory = Clothing,
+        ItemType = base:clothing,
+        Weight = 2.0,
+        Icon = Jacket_SheepskinNavy,
+        BiteDefense = 20,
+        BloodLocation = Jacket,
+        BodyLocation = base:jacket,
+        ClothingItem = Jacket_SheepSkin_Navy,
+        CombatSpeedModifier = 0.97,
+        FabricType = Leather,
+        Insulation = 0.7,
+        NeckProtectionModifier = 0.5,
+        RunSpeedModifier = 0.95,
+        ScratchDefense = 40,
+        WaterResistance = 0.5,
+        WindResistance = 0.8,
+        WorldStaticModel = JacketCoat_Ground,
+        Tags = base:ripclothingleather,
+    }
+}

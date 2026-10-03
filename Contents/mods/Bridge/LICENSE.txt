@@ -1,0 +1,17 @@
+Stay With Me (Steam Workshop ID 3800989007, Mod ID Bridge)
+Copyright (c) 2026 Albrecht. All rights reserved.
+
+Do not reupload or reuse code or assets without permission.
+
+This covers the code, dialogue and other text, animations, images and all
+other files of this mod, in whole or in part: copying them into another mod,
+reuploading this mod, and reuploading a modified copy of it.
+
+Allowed without asking:
+- playing with this mod, including on your own servers;
+- changing it for your own personal use, without uploading it anywhere;
+- reading the code to make another mod compatible with this one.
+
+For anything else, ask the author on the mod's Steam Workshop page first.
+These terms apply no matter what tools are used to copy or adapt the work,
+including AI assistants and code generators.
