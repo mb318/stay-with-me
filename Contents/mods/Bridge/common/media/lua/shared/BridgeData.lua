@@ -446,8 +446,64 @@ function BridgeData.spnccMuscle()
 end
 
 
+function BridgeData.spnccMuscleTypes()
+    local d = spnccData()
+    if d == nil or type(d.Muscle) ~= "table" then return nil end
+    return d.Muscle
+end
+
+
 function BridgeData.spnccOn()
     return BridgeData.spnccFaces() ~= nil or BridgeData.spnccDetails() ~= nil
+end
+
+
+function BridgeData.makeupList()
+    if BridgeData._makeup ~= nil then return BridgeData._makeup or nil end
+    local defs = rawget(_G, "MakeUpDefinitions")
+    if defs == nil or type(defs.makeup) ~= "table" then
+        BridgeData._makeup = false
+        return nil
+    end
+    local out = {}
+    for _, m in ipairs(defs.makeup) do
+        if type(m.item) == "string" and m.item ~= "" then
+            out[#out + 1] = { item = m.item, category = m.category or "FullFace", name = m.name }
+        end
+    end
+    if #out == 0 then
+        BridgeData._makeup = false
+        return nil
+    end
+    BridgeData._makeup = out
+    return out
+end
+
+
+function BridgeData.makeupMeta(itemType)
+    for _, m in ipairs(BridgeData.makeupList() or {}) do
+        if m.item == itemType then return m end
+    end
+    return nil
+end
+
+
+function BridgeData.cleanMakeup(list)
+    if type(list) ~= "table" then return nil end
+    local out, seen = {}, {}
+    for _, itemType in ipairs(list) do
+        local m = BridgeData.makeupMeta(itemType)
+        if m ~= nil and not seen[m.category] then
+            seen[m.category] = true
+            out[#out + 1] = itemType
+        end
+    end
+    return out
+end
+
+
+function BridgeData.makeupOf(rec)
+    return BridgeData.cleanMakeup(rec ~= nil and rec.makeup or nil) or {}
 end
 
 

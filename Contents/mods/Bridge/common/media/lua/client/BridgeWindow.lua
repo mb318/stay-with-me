@@ -79,7 +79,7 @@ function BridgeWindow.lookKey(st)
     return BridgeData.skinOf(st) .. "|" .. BridgeData.hairOf(st) .. "|"
         .. tostring(hc.r) .. "," .. tostring(hc.g) .. "," .. tostring(hc.b) .. "|"
         .. tostring(st ~= nil and st.face or "") .. "|" .. table.concat((st ~= nil and st.details) or {}, ",") .. "|"
-        .. tostring(BridgeData.muscleOf(st)) .. "|"
+        .. tostring(BridgeData.muscleOf(st)) .. "|" .. table.concat(BridgeData.makeupOf(st), ",") .. "|"
         .. BridgeItems.lookKey(BridgeItems.decode(items))
 end
 
@@ -141,7 +141,7 @@ end
 
 
 function BridgeWindow.addCustomDesc(desc, st)
-    if desc == nil or not BridgeData.spnccOn() then return end
+    if desc == nil then return end
     BridgeWindow.missingCustom = BridgeWindow.missingCustom or {}
     local idx = BridgeData.skinIndex(st)
     local function add(id, texture)
@@ -156,19 +156,24 @@ function BridgeWindow.addCustomDesc(desc, st)
                 return
             end
             local v = item:getVisual()
-            if v ~= nil then v:setBaseTexture(texture) v:setTextureChoice(texture) end
+            if v ~= nil and texture ~= nil then v:setBaseTexture(texture) v:setTextureChoice(texture) end
             desc:setWornItem(item:getBodyLocation(), item)
         end)
     end
-    local face = BridgeData.faceEntry(st)
-    if face ~= nil then add(face.id, BridgeData.spnccTexture(face, idx)) end
-    for _, d in ipairs(BridgeData.detailEntries(st)) do
-        add(d.id, BridgeData.spnccTexture(d, idx))
+    if BridgeData.spnccOn() then
+        local face = BridgeData.faceEntry(st)
+        if face ~= nil then add(face.id, BridgeData.spnccTexture(face, idx)) end
+        for _, d in ipairs(BridgeData.detailEntries(st)) do
+            add(d.id, BridgeData.spnccTexture(d, idx))
+        end
+        local m = BridgeData.muscleOf(st)
+        if m > 0 then
+            local mid = BridgeData.spnccMuscle()
+            if mid ~= nil then add(mid, idx + (m == 2 and 5 or 0)) end
+        end
     end
-    local m = BridgeData.muscleOf(st)
-    if m > 0 then
-        local mid = BridgeData.spnccMuscle()
-        if mid ~= nil then add(mid, idx + (m == 2 and 5 or 0)) end
+    for _, type in ipairs(BridgeData.makeupOf(st)) do
+        add(type, nil)
     end
 end
 

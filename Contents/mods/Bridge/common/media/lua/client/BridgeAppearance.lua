@@ -128,13 +128,13 @@ end
 
 
 
-BridgeAppearance.candidate = { skin = nil, hair = nil, hairColor = nil, face = nil, details = {}, muscle = 0 }
+BridgeAppearance.candidate = { skin = nil, hair = nil, hairColor = nil, face = nil, details = {}, muscle = 0, makeup = {} }
 
 function BridgeAppearance.makePreviewDesc()
     local st = Bridge.store or {}
     local c = BridgeAppearance.candidate
     local tmp = { skin = c.skin, hair = c.hair, hairColor = c.hairColor, items = st.items,
-                  face = c.face, details = c.details, muscle = c.muscle }
+                  face = c.face, details = c.details, muscle = c.muscle, makeup = c.makeup }
     return BridgeWindow.makeDesc(tmp)
 end
 
@@ -215,6 +215,18 @@ function BridgeAppearance.setMuscle(level)
     if m < 0 then m = 0 end
     if m > BridgeData.MUSCLE_MAX then m = BridgeData.MUSCLE_MAX end
     BridgeAppearance.candidate.muscle = m
+    BridgeAppearance.refreshPreview()
+    BridgeAppearance.refreshViews()
+end
+
+function BridgeAppearance.setMakeup(category, itemType)
+    local out = {}
+    for _, t in ipairs(BridgeAppearance.candidate.makeup) do
+        local m = BridgeData.makeupMeta(t)
+        if m == nil or m.category ~= category then out[#out + 1] = t end
+    end
+    if itemType ~= nil and itemType ~= "" then out[#out + 1] = itemType end
+    BridgeAppearance.candidate.makeup = out
     BridgeAppearance.refreshPreview()
     BridgeAppearance.refreshViews()
 end
@@ -540,7 +552,87 @@ end
 
 
 
+BridgeAppearanceMakeup = ISPanel:derive("BridgeAppearanceMakeup")
+
+function BridgeAppearanceMakeup:createChildren()
+    ISPanel.createChildren(self)
+    self.combos, self.labelY = {}, {}
+    local defs = rawget(_G, "MakeUpDefinitions")
+    local order = { "FullFace", "Eyes", "EyesShadow", "Lips" }
+    local cw = math.min(260, self.width - PAD * 2)
+    local y = PAD + FONT_S + PAD
+    for _, cat in ipairs(order) do
+        local info = defs ~= nil and defs.categories ~= nil and defs.categories[cat] or nil
+        if info ~= nil then
+            self.labelY[cat] = y
+            y = y + FONT_S + 4
+            local combo = ISComboBox:new(PAD, y, cw, BTN_H, self, BridgeAppearanceMakeup.onPick)
+            combo:initialise()
+            combo.category = cat
+            combo:addOptionWithData(tr("AppearanceNone"), nil)
+            for _, m in ipairs(defs.makeup) do
+                if m.category == cat then
+                    combo:addOptionWithData(gameText("MakeUpType_" .. tostring(m.name), tostring(m.name)), m.item)
+                end
+            end
+            self:addChild(combo)
+            self.combos[cat] = combo
+            y = y + BTN_H + PAD
+        end
+    end
+end
+
+function BridgeAppearanceMakeup:render()
+    self:drawText(tr("AppearanceMakeup"), PAD, PAD, 1, 1, 1, 1, UIFont.Small)
+    local defs = rawget(_G, "MakeUpDefinitions")
+    for cat, ly in pairs(self.labelY) do
+        local info = defs ~= nil and defs.categories ~= nil and defs.categories[cat] or nil
+        local label = cat
+        if info ~= nil then label = gameText("MakeUpCategory_" .. tostring(info.name), cat) end
+        self:drawText(label, PAD, ly, 1, 1, 1, 1, UIFont.Small)
+    end
+end
+
+function BridgeAppearanceMakeup:onPick(combo)
+    BridgeAppearance.setMakeup(combo.category, combo:getSelectedData())
+end
+
+function BridgeAppearanceMakeup:refresh()
+    for cat, combo in pairs(self.combos) do
+        local current = nil
+        for _, t in ipairs(BridgeAppearance.candidate.makeup) do
+            local m = BridgeData.makeupMeta(t)
+            if m ~= nil and m.category == cat then current = t break end
+        end
+        combo:selectData(current)
+    end
+end
+
+function BridgeAppearanceMakeup:new(x, y, width, height)
+    local o = ISPanel:new(x, y, width, height)
+    setmetatable(o, self)
+    self.__index = self
+    o:noBackground()
+    return o
+end
+
+
+
 BridgeAppearance.Window = ISCollapsableWindow:derive("BridgeAppearanceWindow")
+
+BridgeAppearance.ZOOM_MIN = 0
+BridgeAppearance.ZOOM_MAX = 20
+BridgeAppearance.ZOOM_STEP = 4
+BridgeAppearance.ZOOM = { body = 0, face = 18, hair = 16, details = 18, makeup = 20 }
+
+local function zoomY(zoom)
+    local z = zoom
+    if z > 18 then z = 18 end
+    local y = -0.5 + (z / 18) * (-0.375)
+    if y < -0.875 then y = -0.875 end
+    return y
+end
+
 
 function BridgeAppearance.Window:createChildren()
     ISCollapsableWindow.createChildren(self)
@@ -569,26 +661,50 @@ function BridgeAppearance.Window:createChildren()
 
     local innerH = tabH - self.panel.tabHeight
     self.bodyView = BridgeAppearanceBody:new(0, 0, tabW, innerH)
+    self.bodyView.tabKey = "body"
     self.bodyView:initialise()
     self.panel:addView(tr("AppearanceBody"), self.bodyView)
 
     self.faceView = nil
     if BridgeData.spnccFaces() ~= nil then
         self.faceView = BridgeAppearanceFace:new(0, 0, tabW, innerH)
+        self.faceView.tabKey = "face"
         self.faceView:initialise()
         self.panel:addView(tr("AppearanceFace"), self.faceView)
     end
 
     self.hairView = BridgeAppearanceHair:new(0, 0, tabW, innerH)
+    self.hairView.tabKey = "hair"
     self.hairView:initialise()
     self.panel:addView(tr("AppearanceHair"), self.hairView)
 
     self.detailView = nil
     if BridgeData.spnccDetails() ~= nil then
         self.detailView = BridgeAppearanceDetails:new(0, 0, tabW, innerH)
+        self.detailView.tabKey = "details"
         self.detailView:initialise()
         self.panel:addView(tr("AppearanceDetails"), self.detailView)
     end
+
+    self.makeupView = nil
+    if BridgeData.makeupList() ~= nil then
+        self.makeupView = BridgeAppearanceMakeup:new(0, 0, tabW, innerH)
+        self.makeupView.tabKey = "makeup"
+        self.makeupView:initialise()
+        self.panel:addView(tr("AppearanceMakeup"), self.makeupView)
+    end
+
+    local zy = th + PAD + PREVIEW_H + PAD
+    self.zoomOutBtn = ISButton:new(PAD, zy, 30, BTN_H, "-", self, BridgeAppearance.Window.onZoomOut)
+    self.zoomOutBtn:initialise()
+    self.zoomOutBtn:instantiate()
+    self.zoomOutBtn.borderColor = { r = 1, g = 1, b = 1, a = 0.1 }
+    self:addChild(self.zoomOutBtn)
+    self.zoomInBtn = ISButton:new(PAD + 34, zy, 30, BTN_H, "+", self, BridgeAppearance.Window.onZoomIn)
+    self.zoomInBtn:initialise()
+    self.zoomInBtn:instantiate()
+    self.zoomInBtn.borderColor = { r = 1, g = 1, b = 1, a = 0.1 }
+    self:addChild(self.zoomInBtn)
 
     local by = self.height - rh - footerH + PAD
     local applyW = textW(UIFont.Small, tr("AppearanceApply")) + PAD * 3
@@ -614,17 +730,57 @@ function BridgeAppearance.Window:prerender()
     end
 end
 
+function BridgeAppearance.Window:setZoom(zoom)
+    if zoom == nil then zoom = 0 end
+    if zoom < BridgeAppearance.ZOOM_MIN then zoom = BridgeAppearance.ZOOM_MIN end
+    if zoom > BridgeAppearance.ZOOM_MAX then zoom = BridgeAppearance.ZOOM_MAX end
+    self.zoom = zoom
+    if self.preview ~= nil then
+        pcall(function() self.preview:setZoom(zoom) end)
+        pcall(function() self.preview:setYOffset(zoomY(zoom)) end)
+        pcall(function() self.preview:setXOffset(0) end)
+    end
+    if self.zoomInBtn ~= nil then self.zoomInBtn:setVisible(zoom < BridgeAppearance.ZOOM_MAX) end
+    if self.zoomOutBtn ~= nil then self.zoomOutBtn:setVisible(zoom > BridgeAppearance.ZOOM_MIN) end
+end
+
+function BridgeAppearance.Window:applyTabZoom(key)
+    local z = BridgeAppearance.ZOOM[key]
+    if z == nil then z = 0 end
+    self:setZoom(z)
+end
+
+function BridgeAppearance.Window:onZoomIn()
+    self:setZoom((self.zoom or 0) + BridgeAppearance.ZOOM_STEP)
+end
+
+function BridgeAppearance.Window:onZoomOut()
+    self:setZoom((self.zoom or 0) - BridgeAppearance.ZOOM_STEP)
+end
+
+function BridgeAppearance.Window:update()
+    ISCollapsableWindow.update(self)
+    local v = nil
+    pcall(function() v = self.panel:getActiveView() end)
+    if v ~= nil and v ~= self.lastView then
+        self.lastView = v
+        self:applyTabZoom(v.tabKey)
+    end
+end
+
 function BridgeAppearance.Window:refresh()
     if self.bodyView ~= nil then self.bodyView:refresh() end
     if self.faceView ~= nil then self.faceView:refresh() end
     if self.hairView ~= nil then self.hairView:refresh() end
     if self.detailView ~= nil then self.detailView:refresh() end
+    if self.makeupView ~= nil then self.makeupView:refresh() end
 end
 
 function BridgeAppearance.Window:tabName(which)
     if which == "body" then return tr("AppearanceBody") end
     if which == "face" then return tr("AppearanceFace") end
     if which == "details" then return tr("AppearanceDetails") end
+    if which == "makeup" then return tr("AppearanceMakeup") end
     return tr("AppearanceHair")
 end
 
@@ -648,6 +804,9 @@ function BridgeAppearance.Window:onApply()
     end
     if BridgeData.spnccDetails() ~= nil then
         pcall(function() Bridge.setDetails(c.details) end)
+    end
+    if BridgeData.makeupList() ~= nil then
+        pcall(function() Bridge.setMakeup(c.makeup) end)
     end
 end
 
@@ -690,6 +849,7 @@ function BridgeAppearance.open(tab)
     c.face = BridgeData.cleanFace(Bridge.store.face)
     c.details = BridgeData.cleanDetails(Bridge.store.details) or {}
     c.muscle = BridgeData.muscleOf(Bridge.store)
+    c.makeup = BridgeData.makeupOf(Bridge.store)
     local w = BridgeAppearance.Window:new(100, 100, BridgeAppearance.WIDTH, BridgeAppearance.HEIGHT)
     pcall(function()
         local sw, sh = getCore():getScreenWidth(), getCore():getScreenHeight()

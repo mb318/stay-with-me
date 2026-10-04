@@ -1993,6 +1993,10 @@ end
 
 function Bridge.setFace(name)
     local face = BridgeData.cleanFace(name)
+    if BridgeInventory ~= nil and BridgeInventory.dbg ~= nil then
+        BridgeInventory.dbg("setFace " .. tostring(name) .. " -> " .. tostring(face) ..
+            " alive=" .. tostring(Bridge.alive()) .. " kind=" .. tostring(Bridge.kind))
+    end
     if Bridge.store ~= nil then Bridge.store.face = face end
     if Bridge.mp then
         pcall(function() sendClientCommand(BridgeData.owner(), "Bridge", "state", { face = face or "" }) end)
@@ -2034,6 +2038,9 @@ function Bridge.setMuscle(level)
     m = math.floor(m)
     if m < 0 then m = 0 end
     if m > BridgeData.MUSCLE_MAX then m = BridgeData.MUSCLE_MAX end
+    if BridgeInventory ~= nil and BridgeInventory.dbg ~= nil then
+        BridgeInventory.dbg("setMuscle " .. tostring(m) .. " alive=" .. tostring(Bridge.alive()) .. " kind=" .. tostring(Bridge.kind))
+    end
     if Bridge.store ~= nil then Bridge.store.muscle = m end
     if Bridge.mp then
         pcall(function() sendClientCommand(BridgeData.owner(), "Bridge", "state", { muscle = m }) end)
@@ -2047,6 +2054,28 @@ function Bridge.setMuscle(level)
     end
     log("muscle=" .. tostring(m))
     return "muscle=" .. tostring(m)
+end
+
+
+function Bridge.setMakeup(list)
+    local makeup = BridgeData.cleanMakeup(list)
+    if makeup == nil then return "bad makeup" end
+    if BridgeInventory ~= nil and BridgeInventory.dbg ~= nil then
+        BridgeInventory.dbg("setMakeup n=" .. tostring(#makeup) .. " alive=" .. tostring(Bridge.alive()) .. " kind=" .. tostring(Bridge.kind))
+    end
+    if Bridge.store ~= nil then Bridge.store.makeup = makeup end
+    if Bridge.mp then
+        pcall(function() sendClientCommand(BridgeData.owner(), "Bridge", "state", { makeup = makeup }) end)
+    end
+    if Bridge.alive() and Bridge.kind == "zombie" then
+        pcall(function()
+            BridgeInventory.skin(Bridge.body, Bridge.store)
+            Bridge.body:resetModelNextFrame()
+            Bridge.body:resetModel()
+        end)
+    end
+    log("makeup=" .. tostring(#makeup))
+    return "makeup=" .. tostring(#makeup)
 end
 
 local function setWant(want)
@@ -3505,7 +3534,8 @@ local function applyLook(z, visuals, rec, who)
         l.applied = nil
     end
     local faceKey = tostring(rec ~= nil and rec.face or "") .. "|" ..
-        table.concat((rec ~= nil and rec.details) or {}, ",") .. "|" .. tostring(BridgeData.muscleOf(rec))
+        table.concat((rec ~= nil and rec.details) or {}, ",") .. "|" .. tostring(BridgeData.muscleOf(rec)) ..
+        "|" .. table.concat(BridgeData.makeupOf(rec), ",")
     if faceKey ~= l.faceKey then
         l.faceKey = faceKey
         l.applied = nil

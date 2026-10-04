@@ -1010,6 +1010,22 @@ BridgeServer.Commands.state = function(player, args)
             end
         end
     end
+    if args.makeup ~= nil then
+        local makeup = BridgeData.cleanMakeup(args.makeup)
+        if makeup ~= nil then
+            local old = rec.makeup or {}
+            local same = (#old == #makeup)
+            if same then
+                for i = 1, #old do
+                    if old[i] ~= makeup[i] then same = false break end
+                end
+            end
+            if not same then
+                rec.makeup = makeup
+                changed = true
+            end
+        end
+    end
 
     if args.keep ~= nil and BridgeData.keepAllowed(args.keep) and rec.keep ~= args.keep then
         rec.keep = args.keep

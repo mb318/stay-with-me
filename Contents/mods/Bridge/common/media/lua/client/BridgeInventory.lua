@@ -73,21 +73,101 @@ local function missingOnce(id)
 end
 
 
-function BridgeInventory.custom(b, rec)
-    if b == nil or not BridgeData.spnccOn() then return end
-    local remote = false
-    pcall(function() remote = b:isRemoteZombie() == true end)
-    if remote then return end
-    local key = tostring(BridgeData.skinIndex(rec)) .. "|" .. tostring(rec ~= nil and rec.face or "") ..
-        "|" .. table.concat((rec ~= nil and rec.details) or {}, ",") .. "|" .. tostring(BridgeData.muscleOf(rec))
-    if BridgeInventory.customKeys[b] == key then return end
-    BridgeInventory.customKeys[b] = key
+BridgeInventory.DEBUG = 0
+function BridgeInventory.dbg(text)
+    if BridgeInventory.DEBUG == 1 then print("[BridgeInv] " .. tostring(text)) end
+end
 
+
+local function isMakeupItem(item)
+    if item == nil then return false end
+    local loc = nil
+    pcall(function() loc = item:getBodyLocation() end)
+    if loc == nil then return false end
+    local name = nil
+    pcall(function() name = loc:getTranslationName() end)
+    return type(name) == "string" and string.sub(name, 1, 6) == "MakeUp"
+end
+
+
+local function isMuscleItem(item)
+    if item == nil then return false end
+    local types = BridgeData.spnccMuscleTypes()
+    if types == nil then return false end
+    local t = nil
+    pcall(function() t = item:getFullType() end)
+    if t == nil then return false end
+    for _, id in ipairs(types) do
+        if id == t then return true end
+    end
+    return false
+end
+
+
+local function removeMakeup(b)
     pcall(function()
         local worn = b:getWornItems()
         for i = worn:size() - 1, 0, -1 do
             local it = worn:getItemByIndex(i)
-            if it ~= nil and (hasTag(it, "Face") or hasTag(it, "BodyDetail") or hasTag(it, "Muscle")) then
+            if it ~= nil and isMakeupItem(it) then
+                b:removeWornItem(it)
+                local inv = b:getInventory()
+                if inv ~= nil then inv:Remove(it) end
+            end
+        end
+    end)
+end
+
+
+local function addMakeup(b, list)
+    for _, type in ipairs(list) do
+        local item = instanceItem(type)
+        if item ~= nil then
+            local loc = nil
+            pcall(function() loc = item:getBodyLocation() end)
+            BridgeInventory.dbg("makeup add " .. tostring(type) .. " loc=" .. tostring(loc))
+            if loc ~= nil then
+                pcall(function() b:getInventory():AddItem(item) end)
+                pcall(function() b:setWornItem(loc, item) end)
+            end
+        else
+            missingOnce(type)
+            BridgeInventory.dbg("makeup nil: " .. tostring(type))
+        end
+    end
+end
+
+
+function BridgeInventory.custom(b, rec)
+    if b == nil then BridgeInventory.dbg("custom: b nil") return end
+    local isLocal = (Bridge ~= nil and b == Bridge.body)
+    if BridgeInventory.DEBUG == 1 then
+        BridgeInventory.dbg(string.format("custom enter local=%s spnccOn=%s faces=%s makeup=%s face=%s details=%s muscle=%s makeupN=%s",
+            tostring(isLocal), tostring(BridgeData.spnccOn()), tostring(BridgeData.spnccFaces() ~= nil),
+            tostring(BridgeData.makeupList() ~= nil), tostring(rec ~= nil and rec.face or ""),
+            tostring(rec ~= nil and #(rec.details or {}) or 0), tostring(BridgeData.muscleOf(rec)),
+            tostring(#BridgeData.makeupOf(rec))))
+    end
+    if not isLocal then
+        BridgeInventory.dbg("custom: not local body skip")
+        return
+    end
+    local makeup = BridgeData.makeupOf(rec)
+    local key = tostring(BridgeData.skinIndex(rec)) .. "|" .. tostring(rec ~= nil and rec.face or "") ..
+        "|" .. table.concat((rec ~= nil and rec.details) or {}, ",") .. "|" .. tostring(BridgeData.muscleOf(rec)) ..
+        "|" .. table.concat(makeup, ",")
+    if BridgeInventory.customKeys[b] == key then
+        BridgeInventory.dbg("custom: cached skip")
+        return
+    end
+    BridgeInventory.customKeys[b] = key
+
+    removeMakeup(b)
+    pcall(function()
+        local worn = b:getWornItems()
+        for i = worn:size() - 1, 0, -1 do
+            local it = worn:getItemByIndex(i)
+            if it ~= nil and (hasTag(it, "Face") or hasTag(it, "BodyDetail") or hasTag(it, "Muscle") or isMuscleItem(it)) then
                 b:removeWornItem(it)
                 local inv = b:getInventory()
                 if inv ~= nil then inv:Remove(it) end
@@ -95,38 +175,45 @@ function BridgeInventory.custom(b, rec)
         end
     end)
 
-    local idx = BridgeData.skinIndex(rec)
-    local function put(id, texture)
-        if type(id) ~= "string" or id == "" then return end
-        local item = instanceItem(id)
-        if item == nil then missingOnce(id) return end
-        pcall(function()
-            local v = item:getVisual()
-            if v ~= nil then v:setBaseTexture(texture) v:setTextureChoice(texture) end
-        end)
-        pcall(function() b:getInventory():AddItem(item) end)
-        pcall(function() b:setWornItem(item:getBodyLocation(), item) end)
+    if BridgeData.spnccOn() then
+        local idx = BridgeData.skinIndex(rec)
+        local function put(id, texture)
+            if type(id) ~= "string" or id == "" then return end
+            local item = instanceItem(id)
+            if item == nil then missingOnce(id) BridgeInventory.dbg("put nil: " .. tostring(id)) return end
+            local loc = nil
+            pcall(function() loc = item:getBodyLocation() end)
+            BridgeInventory.dbg("put " .. tostring(id) .. " tex=" .. tostring(texture) .. " loc=" .. tostring(loc))
+            pcall(function()
+                local v = item:getVisual()
+                if v ~= nil then v:setBaseTexture(texture) v:setTextureChoice(texture) end
+            end)
+            pcall(function() b:getInventory():AddItem(item) end)
+            pcall(function() b:setWornItem(loc, item) end)
+        end
+        local face = BridgeData.faceEntry(rec)
+        if face ~= nil then put(face.id, BridgeData.spnccTexture(face, idx)) end
+        for _, d in ipairs(BridgeData.detailEntries(rec)) do
+            put(d.id, BridgeData.spnccTexture(d, idx))
+        end
+        local m = BridgeData.muscleOf(rec)
+        if m > 0 then
+            local mid = BridgeData.spnccMuscle()
+            if mid ~= nil then put(mid, idx + (m == 2 and 5 or 0)) end
+        end
     end
+    addMakeup(b, makeup)
 
-    local face = BridgeData.faceEntry(rec)
-    if face ~= nil then put(face.id, BridgeData.spnccTexture(face, idx)) end
-    for _, d in ipairs(BridgeData.detailEntries(rec)) do
-        put(d.id, BridgeData.spnccTexture(d, idx))
-    end
-    local m = BridgeData.muscleOf(rec)
-    if m > 0 then
-        local mid = BridgeData.spnccMuscle()
-        if mid ~= nil then put(mid, idx + (m == 2 and 5 or 0)) end
-    end
-    pcall(function() b:getWornItems():setDirty() end)
-    pcall(function() triggerEvent("OnClothingUpdated", b) end)
+    pcall(function() BridgeInventory.applyWorn(b) end)
     pcall(function() b:resetModelNextFrame() end)
+    local wornN = 0
+    pcall(function() wornN = b:getWornItems():size() end)
+    BridgeInventory.dbg("custom done worn=" .. tostring(wornN) .. " visuals=" .. tostring(BridgeInventory.visualCount))
 end
 
 
 function BridgeInventory.addCustomVisuals(b, rec)
-    if b == nil or not BridgeData.spnccOn() then return end
-    local idx = BridgeData.skinIndex(rec)
+    if b == nil then return end
     local visuals = nil
     pcall(function() visuals = b:getItemVisuals() end)
     if visuals == nil then return end
@@ -136,20 +223,28 @@ function BridgeInventory.addCustomVisuals(b, rec)
             local iv = ItemVisual.new()
             iv:setItemType(id)
             iv:setClothingItemName(id)
-            iv:setBaseTexture(texture)
-            iv:setTextureChoice(texture)
+            if texture ~= nil then
+                iv:setBaseTexture(texture)
+                iv:setTextureChoice(texture)
+            end
             visuals:add(iv)
         end)
     end
-    local face = BridgeData.faceEntry(rec)
-    if face ~= nil then add(face.id, BridgeData.spnccTexture(face, idx)) end
-    for _, d in ipairs(BridgeData.detailEntries(rec)) do
-        add(d.id, BridgeData.spnccTexture(d, idx))
+    if BridgeData.spnccOn() then
+        local idx = BridgeData.skinIndex(rec)
+        local face = BridgeData.faceEntry(rec)
+        if face ~= nil then add(face.id, BridgeData.spnccTexture(face, idx)) end
+        for _, d in ipairs(BridgeData.detailEntries(rec)) do
+            add(d.id, BridgeData.spnccTexture(d, idx))
+        end
+        local m = BridgeData.muscleOf(rec)
+        if m > 0 then
+            local mid = BridgeData.spnccMuscle()
+            if mid ~= nil then add(mid, idx + (m == 2 and 5 or 0)) end
+        end
     end
-    local m = BridgeData.muscleOf(rec)
-    if m > 0 then
-        local mid = BridgeData.spnccMuscle()
-        if mid ~= nil then add(mid, idx + (m == 2 and 5 or 0)) end
+    for _, type in ipairs(BridgeData.makeupOf(rec)) do
+        add(type, nil)
     end
 end
 
@@ -2725,7 +2820,7 @@ function BridgeInventory.snapshot(b)
                 local item = items:get(i)
                 if item ~= nil then
                     local rec = BridgeItems.record(item, false)
-                    local skip = hasTag(item, "Face") or hasTag(item, "BodyDetail") or hasTag(item, "Muscle")
+                    local skip = hasTag(item, "Face") or hasTag(item, "BodyDetail") or hasTag(item, "Muscle") or isMuscleItem(item) or isMakeupItem(item)
                     if not skip then
                         if parent == nil then
                             pcall(function() rec.w = b:isEquippedClothing(item) end)

@@ -820,6 +820,8 @@
     "IGUI_NotAlone_AppearanceFace": "Face",
     "IGUI_NotAlone_AppearanceHair": "Hair",
     "IGUI_NotAlone_AppearanceDetails": "Details",
+    "IGUI_NotAlone_AppearanceMakeup": "Make-up",
+    "IGUI_NotAlone_AppearanceNone": "None",
     "IGUI_NotAlone_AppearanceDefaultFace": "Default face",
     "IGUI_NotAlone_AppearanceClearDetails": "Clear details",
     "IGUI_NotAlone_AppearanceColor": "Hair color",

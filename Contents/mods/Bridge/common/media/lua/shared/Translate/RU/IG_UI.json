@@ -820,6 +820,8 @@
     "IGUI_NotAlone_AppearanceFace": "Лицо",
     "IGUI_NotAlone_AppearanceHair": "Волосы",
     "IGUI_NotAlone_AppearanceDetails": "Детали",
+    "IGUI_NotAlone_AppearanceMakeup": "Макияж",
+    "IGUI_NotAlone_AppearanceNone": "Нет",
     "IGUI_NotAlone_AppearanceDefaultFace": "Обычное лицо",
     "IGUI_NotAlone_AppearanceClearDetails": "Убрать детали",
     "IGUI_NotAlone_AppearanceColor": "Цвет волос",
