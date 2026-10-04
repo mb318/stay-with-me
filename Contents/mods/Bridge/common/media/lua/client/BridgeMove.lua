@@ -4308,6 +4308,32 @@ local function climbCost(kind)
 end
 
 
+local function squareFloor(sq)
+    if sq == nil then return nil end
+    local known = nil
+    pcall(function() known = sq:hasFloor(false) or sq:hasFloor(true) end)
+    if known == nil then
+        pcall(function() known = sq:getFloor() ~= nil end)
+    end
+    return known
+end
+
+
+function BridgeMove.vaultSafe(body, from, to)
+    if from == nil or to == nil then return true end
+    local offStairs = false
+    pcall(function()
+        if from.HasStairs ~= nil and from:HasStairs() and to.isSameStaircase ~= nil then
+            offStairs = not from:isSameStaircase(to:getX(), to:getY(), to:getZ())
+        end
+    end)
+    if offStairs then return false, "vaults off the staircase" end
+    if math.floor(from:getZ()) <= 0 then return true end
+    if squareFloor(to) == false then return false, "far side is open air" end
+    return true
+end
+
+
 
 
 
@@ -4319,6 +4345,8 @@ end
 
 
 function BridgeMove.shouldCross(body, kind, from, to)
+    local safe, blockedWhy = BridgeMove.vaultSafe(body, from, to)
+    if not safe then return false, blockedWhy end
     if BridgeMove.steering then
         local yes, why = BridgeMove.trailCrosses(body, from, to)
         return yes, why

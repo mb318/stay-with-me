@@ -60,7 +60,7 @@ BridgeCallout.SAY = {
 }
 
 --Global minimum seconds between any two callouts
-BridgeCallout.REPEAT_GAP = 5
+BridgeCallout.REPEAT_GAP = 8
 
 --Callout cooldowns, in seconds
 BridgeCallout.EVENTS = {

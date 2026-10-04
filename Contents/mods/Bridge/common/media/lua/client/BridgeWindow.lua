@@ -85,6 +85,34 @@ end
 
 
 
+function BridgeWindow.relPercent(r)
+    local f = (r ~= nil and r.f) or 0
+    local pct = (f + 100) / 2
+    if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
+    return pct
+end
+
+function BridgeWindow.relColor(pct)
+    if pct < 50 then
+        local t = pct / 50
+        return 0.85, 0.20 + 0.65 * t, 0.15
+    end
+    local t = (pct - 50) / 50
+    return 0.85 - 0.65 * t, 0.85, 0.15
+end
+
+function BridgeWindow.relText(r)
+    local label = ""
+    if BridgeSocial ~= nil and BridgeSocial.label ~= nil then
+        pcall(function() label = BridgeSocial.label() end)
+    end
+    if label == nil or label == "" then
+        pcall(function() label = getText("IGUI_NotAlone_Rel_" .. BridgeData.relTier(r)) end)
+    end
+    local pct = math.floor(BridgeWindow.relPercent(r) + 0.5)
+    return tostring(label) .. "  " .. pct .. "%"
+end
+
 function BridgeWindow.makeDesc(st)
     local desc = SurvivorFactory.CreateSurvivor()
     desc:setFemale(true)
@@ -212,6 +240,20 @@ function BridgeWindowInfo:render()
     y = y + PAD
     self:drawText(fitText(UIFont.Small, BridgeMenu.status(), colW), x, y, 0.75, 0.75, 0.75, 1, UIFont.Small)
     y = y + FONT_S + PAD
+
+    local r = BridgeData.relOf(Bridge.store)
+    local pct = BridgeWindow.relPercent(r)
+    local barH = 12
+    local barW = colW
+    self:drawRect(x, y, barW, barH, 1, 0.12, 0.12, 0.12)
+    local fillW = math.floor(barW * pct / 100)
+    if fillW > 0 then
+        local cr, cg, cb = BridgeWindow.relColor(pct)
+        self:drawRect(x, y, fillW, barH, 1, cr, cg, cb)
+    end
+    self:drawRectBorder(x, y, barW, barH, 1, 0.6, 0.6, 0.6)
+    self:drawText(fitText(UIFont.Small, BridgeWindow.relText(r), colW), x, y + barH + 2, 1, 1, 1, 1, UIFont.Small)
+    y = y + barH + 2 + FONT_S + PAD
 
     local present = BridgeMenu.isPresent()
 
