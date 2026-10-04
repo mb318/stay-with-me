@@ -442,6 +442,7 @@ local function humanize(body)
 
 
     pcall(function() body:getModData().ST_Ignore = true end)
+    pcall(function() body:getModData().RandomZedsExcluded = true end)
     body:setVariable("LimpSpeed", 0.80)
     body:setVariable("RunSpeed", 0.65)
     body:setVariable("WalkSpeed", 1.0)
@@ -493,6 +494,7 @@ function Bridge.unhumanize(z, pooled)
     end
     pcall(function() z:setVariable(BODY_VAR, false) end)
     pcall(function() if z:hasModData() then z:getModData().ST_Ignore = nil end end)
+    pcall(function() if z:hasModData() then z:getModData().RandomZedsExcluded = nil end end)
 
     pcall(function() BridgeWeapon.release(z) end)
     pcall(function() z:clearAttachedItems() end)
@@ -564,6 +566,7 @@ function Bridge.releaseForeign(z)
         if z:hasModData() then
             z:getModData().ST_Ignore = nil
             z:getModData().notAloneBody = nil
+            z:getModData().RandomZedsExcluded = nil
         end
     end)
     pcall(function() BridgeWeapon.release(z) end)
@@ -745,7 +748,6 @@ end
 
 
 
-local HER_SKIN = "FemaleBody01"
 Bridge.wornKeep = nil
 Bridge.wornKeepBody = nil
 Bridge.wornKeepSkin = false
@@ -774,7 +776,7 @@ end
 function Bridge.keepWorn(b)
     Bridge.wornKeep = wornNow(b)
     Bridge.wornKeepBody = b
-    Bridge.wornKeepSkin = skinOf(b) == HER_SKIN
+    Bridge.wornKeepSkin = skinOf(b) == BridgeData.skinOf(Bridge.store)
     Bridge.wornKeepVisuals = 0
     pcall(function() Bridge.wornKeepVisuals = b:getItemVisuals():size() end)
 end
@@ -784,7 +786,7 @@ end
 function Bridge.redressedByGame(b)
     if b == nil or Bridge.wornKeepBody ~= b then return false end
     local skin, now = skinOf(b), wornNow(b)
-    return Bridge.wornKeepSkin and skin ~= HER_SKIN and #now < #(Bridge.wornKeep or {}), now, skin
+    return Bridge.wornKeepSkin and skin ~= BridgeData.skinOf(Bridge.store) and #now < #(Bridge.wornKeep or {}), now, skin
 end
 
 
@@ -799,7 +801,7 @@ function Bridge.guardOutfit(b)
         local visuals = -1
         pcall(function() visuals = b:getItemVisuals():size() end)
 
-        if Bridge.wornKeepSkin and skin ~= HER_SKIN and visuals == 0 and (Bridge.wornKeepVisuals or 0) > 0 and #now >= 1 then
+        if Bridge.wornKeepSkin and skin ~= BridgeData.skinOf(Bridge.store) and visuals == 0 and (Bridge.wornKeepVisuals or 0) > 0 and #now >= 1 then
             pcall(function() BridgeInventory.skin(b, outfitStore()) end)
             pcall(function() BridgeInventory.redress(b, true) end)
             Bridge.engineRedress = (Bridge.engineRedress or 0) + 1
@@ -808,7 +810,7 @@ function Bridge.guardOutfit(b)
             return true
         end
         Bridge.wornKeep = now
-        Bridge.wornKeepSkin = skin == HER_SKIN
+        Bridge.wornKeepSkin = skin == BridgeData.skinOf(Bridge.store)
         Bridge.wornKeepVisuals = visuals
         return false
     end
@@ -845,7 +847,7 @@ function Bridge.showReady(b)
     else
         dressed = worn >= want and visuals >= worn
     end
-    local skinOk = skinOf(b) == HER_SKIN
+    local skinOk = skinOf(b) == BridgeData.skinOf(Bridge.store)
     local age = Bridge.tick - (Bridge.hiddenSince or Bridge.tick)
     if dressed and skinOk and (Bridge.zombieTicks - (Bridge.hiddenTicks or 0)) >= 20 then return true, "dressed" end
     if age < 90 then return false, "waiting" end
@@ -1947,6 +1949,106 @@ function Bridge.setHair(style)
     return "hair=" .. hair
 end
 
+
+function Bridge.setSkin(name)
+    local skin = BridgeData.cleanSkin(name)
+    if skin == nil then return "bad skin: " .. tostring(name) end
+    if Bridge.store ~= nil then Bridge.store.skin = skin end
+    if Bridge.mp then
+        pcall(function() sendClientCommand(BridgeData.owner(), "Bridge", "state", { skin = skin }) end)
+    end
+    if Bridge.alive() and Bridge.kind == "zombie" then
+        pcall(function()
+            BridgeInventory.skin(Bridge.body, Bridge.store)
+            Bridge.body:resetModelNextFrame()
+            Bridge.body:resetModel()
+        end)
+    end
+    log("skin=" .. skin)
+    return "skin=" .. skin
+end
+
+
+function Bridge.setHairColor(r, g, b)
+    local color = BridgeData.cleanHairColor({ r = r, g = g, b = b })
+    if color == nil then return "bad hair color" end
+    if Bridge.store ~= nil then Bridge.store.hairColor = color end
+    if Bridge.mp then
+        pcall(function()
+            sendClientCommand(BridgeData.owner(), "Bridge", "state",
+                { hairColor = { r = color.r, g = color.g, b = color.b } })
+        end)
+    end
+    if Bridge.alive() and Bridge.kind == "zombie" then
+        pcall(function()
+            BridgeInventory.skin(Bridge.body, Bridge.store)
+            Bridge.body:resetModelNextFrame()
+            Bridge.body:resetModel()
+        end)
+    end
+    log(string.format("hairColor=%.2f,%.2f,%.2f", color.r, color.g, color.b))
+    return "hairColor"
+end
+
+
+function Bridge.setFace(name)
+    local face = BridgeData.cleanFace(name)
+    if Bridge.store ~= nil then Bridge.store.face = face end
+    if Bridge.mp then
+        pcall(function() sendClientCommand(BridgeData.owner(), "Bridge", "state", { face = face or "" }) end)
+    end
+    if Bridge.alive() and Bridge.kind == "zombie" then
+        pcall(function()
+            BridgeInventory.skin(Bridge.body, Bridge.store)
+            Bridge.body:resetModelNextFrame()
+            Bridge.body:resetModel()
+        end)
+    end
+    log("face=" .. tostring(face))
+    return "face=" .. tostring(face)
+end
+
+
+function Bridge.setDetails(list)
+    local details = BridgeData.cleanDetails(list)
+    if details == nil then return "bad details" end
+    if Bridge.store ~= nil then Bridge.store.details = details end
+    if Bridge.mp then
+        pcall(function() sendClientCommand(BridgeData.owner(), "Bridge", "state", { details = details }) end)
+    end
+    if Bridge.alive() and Bridge.kind == "zombie" then
+        pcall(function()
+            BridgeInventory.skin(Bridge.body, Bridge.store)
+            Bridge.body:resetModelNextFrame()
+            Bridge.body:resetModel()
+        end)
+    end
+    log("details=" .. tostring(#details))
+    return "details=" .. tostring(#details)
+end
+
+
+function Bridge.setMuscle(level)
+    local m = tonumber(level)
+    if m == nil or m ~= m then return "bad muscle" end
+    m = math.floor(m)
+    if m < 0 then m = 0 end
+    if m > BridgeData.MUSCLE_MAX then m = BridgeData.MUSCLE_MAX end
+    if Bridge.store ~= nil then Bridge.store.muscle = m end
+    if Bridge.mp then
+        pcall(function() sendClientCommand(BridgeData.owner(), "Bridge", "state", { muscle = m }) end)
+    end
+    if Bridge.alive() and Bridge.kind == "zombie" then
+        pcall(function()
+            BridgeInventory.skin(Bridge.body, Bridge.store)
+            Bridge.body:resetModelNextFrame()
+            Bridge.body:resetModel()
+        end)
+    end
+    log("muscle=" .. tostring(m))
+    return "muscle=" .. tostring(m)
+end
+
 local function setWant(want)
     if Bridge.store ~= nil then Bridge.store.want = want end
     if Bridge.mp then
@@ -2279,7 +2381,11 @@ function Bridge.corpseSweep()
                     local c = list:get(i)
                     local hers = false
                     pcall(function()
-                        hers = c:isZombie() and c:isFemale() and c:getHumanVisual():getSkinTexture() == "FemaleBody01"
+                        local skin = nil
+                        pcall(function() skin = c:getHumanVisual():getSkinTexture() end)
+                        local marked = false
+                        pcall(function() marked = BridgeRemnant.hasMark(c:getPersistentOutfitID()) end)
+                        hers = c:isZombie() and c:isFemale() and (skin == BridgeData.skinOf(Bridge.store) or marked)
                             and tostring(c:getOutfitName()) == "Naked"
                     end)
                     if hers then
@@ -2852,7 +2958,7 @@ local function updateZombieBody(body)
     if Bridge.zombieTicks % 30 == 0 and Bridge.hiddenSince == nil then
         local skin = nil
         pcall(function() skin = body:getHumanVisual():getSkinTexture() end)
-        if skin ~= nil and skin ~= "FemaleBody01" then
+        if skin ~= nil and skin ~= BridgeData.skinOf(Bridge.store) then
             pcall(function() BridgeInventory.skin(body, Bridge.store) end)
             pcall(function() body:resetModelNextFrame() end)
             log("skin restored, was " .. tostring(skin))
@@ -3392,9 +3498,21 @@ local function applyLook(z, visuals, rec, who)
         l.hair = hair
         l.applied = nil
     end
+    local hc = BridgeData.hairColorOf(rec)
+    local hckey = tostring(hc.r) .. "," .. tostring(hc.g) .. "," .. tostring(hc.b)
+    if hckey ~= l.hairColorKey then
+        l.hairColorKey = hckey
+        l.applied = nil
+    end
+    local faceKey = tostring(rec ~= nil and rec.face or "") .. "|" ..
+        table.concat((rec ~= nil and rec.details) or {}, ",") .. "|" .. tostring(BridgeData.muscleOf(rec))
+    if faceKey ~= l.faceKey then
+        l.faceKey = faceKey
+        l.applied = nil
+    end
     local skin = nil
     pcall(function() skin = z:getHumanVisual():getSkinTexture() end)
-    local stale = l.applied ~= l.key or skin ~= "FemaleBody01"
+    local stale = l.applied ~= l.key or skin ~= BridgeData.skinOf(rec)
     if stale and (Bridge.time - l.tick) >= 30 then
         l.tick = Bridge.time
         l.applied = l.key
