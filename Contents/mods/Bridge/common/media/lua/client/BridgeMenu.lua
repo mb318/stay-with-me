@@ -22,6 +22,15 @@ local function tr(key, a)
     return text
 end
 
+
+local function tip(option, text)
+    pcall(function()
+        local t = ISInventoryPaneContextMenu.addToolTip()
+        t.description = text
+        option.toolTip = t
+    end)
+end
+
 local function name() return Bridge.companionName() end
 
 
@@ -153,6 +162,12 @@ function BridgeMenu.onKeepDistance(which)
     if present() then Bridge.speak(far and "KeepFarther" or "KeepCloser") end
 end
 
+
+function BridgeMenu.onCombat(mode)
+    Bridge.setCombat(mode)
+    if present() then Bridge.speak("Combat_" .. tostring(mode)) end
+end
+
 function BridgeMenu.onRenameDone(target, button, playerNum)
     if button == nil or button.internal ~= "OK" then return end
     local text = nil
@@ -239,6 +254,26 @@ function BridgeMenu.fill(context, playerNum, fromIcon)
         end
     end
     actions:addOption(tr("Goodbye"), nil, BridgeMenu.onGoodbye)
+
+
+
+    local combatOption = context:addOption(tr("Combat"))
+    local guard = false
+    pcall(function() if BridgeFight ~= nil then guard = BridgeFight.guardOnly end end)
+    if guard then
+        combatOption.isDisabled = true
+        tip(combatOption, tr("CombatGuardTip"))
+    else
+        local combat = ISContextMenu:getNew(context)
+        context:addSubMenu(combatOption, combat)
+        local combatMode = BridgeData.combatOf(st)
+        for _, entry in ipairs({ { "bodyguard", "CombatBodyguard" }, { "escort", "CombatEscort" },
+            { "aggressive", "CombatAggressive" } }) do
+            local o = combat:addOption(tr(entry[2]), entry[1], BridgeMenu.onCombat)
+            if combatMode == entry[1] then o.isDisabled = true end
+            tip(o, tr(entry[2] .. "Tip"))
+        end
+    end
 
     if not BridgeData.KEEP_ON then return end
 

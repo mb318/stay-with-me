@@ -1,0 +1,42 @@
+/*
+sounds_staywithme.txt - Stay With Me
+
+Head-hit sounds for the companion's critical hits. Vanilla FMOD events
+(Zombie/HeadSmash, Zombie/HeadStab, Zombie/HeadSlice) with the vanilla range.
+Played by headSound in BridgeFight.lua.
+*/
+module Base
+{
+    sound NA_HeadSmash
+    {
+        category = Zombie,
+        clip
+        {
+            event = Zombie/HeadSmash,
+            distanceMax = 20,
+            volume = 1.0,
+        }
+    }
+
+    sound NA_HeadStab
+    {
+        category = Zombie,
+        clip
+        {
+            event = Zombie/HeadStab,
+            distanceMax = 20,
+            volume = 1.0,
+        }
+    }
+
+    sound NA_HeadSlice
+    {
+        category = Zombie,
+        clip
+        {
+            event = Zombie/HeadSlice,
+            distanceMax = 20,
+            volume = 1.0,
+        }
+    }
+}

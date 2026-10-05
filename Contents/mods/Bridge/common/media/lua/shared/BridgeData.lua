@@ -269,7 +269,8 @@ BridgeData.KEEP_SIDES_ON = false
 
 
 
-BridgeData.KEEP_ON = false
+
+BridgeData.KEEP_ON = true
 
 function BridgeData.keepAllowed(side)
     if side == "behind" then return true end
@@ -283,6 +284,22 @@ end
 
 function BridgeData.farOf(rec)
     return BridgeData.KEEP_ON == true and rec ~= nil and rec.far == true
+end
+
+
+BridgeData.COMBAT_MODES = { bodyguard = true, escort = true, aggressive = true }
+BridgeData.DEFAULT_COMBAT = "bodyguard"
+
+
+BridgeData.COMBAT = {
+    bodyguard = { rank = "player", engageSelf = 2.5, engageRed = 3.0, targetMax = 6.0, approach = 4.5, leash = 4.0 },
+    escort = { rank = "self", engageSelf = 3.0, engageRed = 5.5, targetMax = 9.0, approach = 7.0, leash = 7.0 },
+    aggressive = { rank = "self", engageSelf = 4.5, engageRed = 11.0, targetMax = 13.0, approach = 12.0, leash = 12.0 },
+}
+
+function BridgeData.combatOf(rec)
+    if rec ~= nil and BridgeData.COMBAT_MODES[rec.combat] then return rec.combat end
+    return BridgeData.DEFAULT_COMBAT
 end
 
 
@@ -322,6 +339,292 @@ function BridgeData.hairOf(rec)
     local hair = rec ~= nil and BridgeData.cleanHair(rec.hair) or nil
     return hair or BridgeData.DEFAULT_HAIR
 end
+
+BridgeData.DEFAULT_SKIN = "FemaleBody01"
+BridgeData.SKINS = { "FemaleBody01", "FemaleBody02", "FemaleBody03", "FemaleBody04", "FemaleBody05" }
+BridgeData.DEFAULT_HAIR_COLOR = { r = 0.55, g = 0.12, b = 0.12 }
+
+
+function BridgeData.cleanSkin(text)
+    if type(text) ~= "string" then return nil end
+    for i = 1, #BridgeData.SKINS do
+        if BridgeData.SKINS[i] == text then return text end
+    end
+    return nil
+end
+
+function BridgeData.skinOf(rec)
+    local skin = rec ~= nil and BridgeData.cleanSkin(rec.skin) or nil
+    return skin or BridgeData.DEFAULT_SKIN
+end
+
+function BridgeData.cleanHairColor(t)
+    if type(t) ~= "table" then return nil end
+    local out = {}
+    for _, k in ipairs({ "r", "g", "b" }) do
+        local v = tonumber(t[k])
+        if v == nil or v ~= v then return nil end
+        if v < 0 then v = 0 end
+        if v > 1 then v = 1 end
+        out[k] = v
+    end
+    return out
+end
+
+function BridgeData.hairColorOf(rec)
+    local color = rec ~= nil and BridgeData.cleanHairColor(rec.hairColor) or nil
+    return color or BridgeData.DEFAULT_HAIR_COLOR
+end
+
+
+
+BridgeData.MUSCLE_MAX = 2
+
+
+local function spnccData()
+    if BridgeData._spnccData ~= nil then return BridgeData._spnccData or nil end
+    local ok, mod = pcall(require, "CharacterCustomisation/SPNCC_Data")
+    BridgeData._spnccData = (ok and type(mod) == "table") and mod or false
+    return BridgeData._spnccData or nil
+end
+
+
+function BridgeData.skinIndex(rec)
+    local n = tonumber(string.match(BridgeData.skinOf(rec), "(%d+)$")) or 1
+    return n - 1
+end
+
+
+function BridgeData.spnccFaces()
+    if BridgeData._faces ~= nil then return BridgeData._faces or nil end
+    local d = spnccData()
+    if d == nil or type(d.FemaleFaces) ~= "table" then
+        BridgeData._faces = false
+        return nil
+    end
+    local out = {}
+    for _, v in pairs(d.FemaleFaces) do
+        if type(v) == "table" and type(v.name) == "string" and v.name ~= "" then out[#out + 1] = v end
+    end
+    if #out == 0 then
+        BridgeData._faces = false
+        return nil
+    end
+    table.sort(out, function(a, b) return a.name < b.name end)
+    BridgeData._faces = out
+    return out
+end
+
+
+function BridgeData.spnccDetails()
+    if BridgeData._details ~= nil then return BridgeData._details or nil end
+    local d = spnccData()
+    if d == nil or type(d.BodyDetails) ~= "table" then
+        BridgeData._details = false
+        return nil
+    end
+    local out = {}
+    for _, v in pairs(d.BodyDetails) do
+        if type(v) == "table" and type(v.name) == "string" and v.name ~= "" and v.female ~= false then
+            out[#out + 1] = v
+        end
+    end
+    if #out == 0 then
+        BridgeData._details = false
+        return nil
+    end
+    table.sort(out, function(a, b) return (a.sort or "b") .. a.name < (b.sort or "b") .. b.name end)
+    BridgeData._details = out
+    return out
+end
+
+
+function BridgeData.spnccMuscle()
+    local d = spnccData()
+    if d == nil or type(d.Muscle) ~= "table" then return nil end
+    return d.Muscle[2]
+end
+
+
+function BridgeData.spnccMuscleTypes()
+    local d = spnccData()
+    if d == nil or type(d.Muscle) ~= "table" then return nil end
+    return d.Muscle
+end
+
+
+function BridgeData.spnccOn()
+    return BridgeData.spnccFaces() ~= nil or BridgeData.spnccDetails() ~= nil
+end
+
+
+function BridgeData.makeupList()
+    if BridgeData._makeup ~= nil then return BridgeData._makeup or nil end
+    local defs = rawget(_G, "MakeUpDefinitions")
+    if defs == nil or type(defs.makeup) ~= "table" then
+        BridgeData._makeup = false
+        return nil
+    end
+    local out = {}
+    for _, m in ipairs(defs.makeup) do
+        if type(m.item) == "string" and m.item ~= "" then
+            out[#out + 1] = { item = m.item, category = m.category or "FullFace", name = m.name }
+        end
+    end
+    if #out == 0 then
+        BridgeData._makeup = false
+        return nil
+    end
+    BridgeData._makeup = out
+    return out
+end
+
+
+function BridgeData.makeupMeta(itemType)
+    for _, m in ipairs(BridgeData.makeupList() or {}) do
+        if m.item == itemType then return m end
+    end
+    return nil
+end
+
+
+local function asList(t)
+    if type(t) ~= "table" then return nil end
+    local out = {}
+    local n = #t
+    if n > 0 then
+        for i = 1, n do out[i] = t[i] end
+        return out
+    end
+    local i = 1
+    while true do
+        local v = t[i]
+        if v == nil then v = t[tostring(i)] end
+        if v == nil then break end
+        out[i] = v
+        i = i + 1
+    end
+    return out
+end
+
+
+local function tokenOk(name)
+    return type(name) == "string" and name ~= "" and #name <= 64 and string.find(name, "[^%w_]") == nil
+end
+
+
+function BridgeData.cleanMakeup(list)
+    list = asList(list)
+    if list == nil then return nil end
+    local out, seen = {}, {}
+    if BridgeData.makeupList() == nil then
+        for _, itemType in ipairs(list) do
+            if type(itemType) == "string" and string.find(itemType, "^[%w_]+%.[%w_]+$") ~= nil and not seen[itemType] then
+                seen[itemType] = true
+                out[#out + 1] = itemType
+            end
+        end
+        return out
+    end
+    for _, itemType in ipairs(list) do
+        local m = BridgeData.makeupMeta(itemType)
+        if m ~= nil and not seen[m.category] then
+            seen[m.category] = true
+            out[#out + 1] = itemType
+        end
+    end
+    return out
+end
+
+
+function BridgeData.makeupOf(rec)
+    return BridgeData.cleanMakeup(rec ~= nil and rec.makeup or nil) or {}
+end
+
+
+function BridgeData.spnccTexture(entry, skinIndex)
+    if type(entry) ~= "table" then return skinIndex or 0 end
+    if type(entry.textures) == "table" then
+        if #entry.textures == 1 then return entry.textures[1] end
+        if #entry.textures >= 5 then return entry.textures[(skinIndex or 0) + 1] end
+    end
+    local off = tonumber(entry.textureOffset) or 0
+    if off < 0 then off = 0 end
+    return (skinIndex or 0) + off
+end
+
+
+function BridgeData.faceEntry(rec)
+    local name = rec ~= nil and rec.face or nil
+    if type(name) ~= "string" or name == "" then return nil end
+    for _, e in ipairs(BridgeData.spnccFaces() or {}) do
+        if e.name == name then return e end
+    end
+    return nil
+end
+
+
+function BridgeData.detailEntries(rec)
+    local out = {}
+    local wanted = asList(rec ~= nil and rec.details or nil) or {}
+    for _, e in ipairs(BridgeData.spnccDetails() or {}) do
+        for _, n in ipairs(wanted) do
+            if n == e.name then out[#out + 1] = e break end
+        end
+    end
+    return out
+end
+
+
+function BridgeData.cleanFace(name)
+    if name == nil or name == "" then return nil end
+    if type(name) ~= "string" then return nil end
+    local faces = BridgeData.spnccFaces()
+    if faces == nil then
+        if tokenOk(name) then return name end
+        return nil
+    end
+    for _, e in ipairs(faces) do
+        if e.name == name then return name end
+    end
+    return nil
+end
+
+
+function BridgeData.cleanDetails(list)
+    list = asList(list)
+    if list == nil then return nil end
+    local catalog = BridgeData.spnccDetails()
+    local seen, out = {}, {}
+    if catalog == nil then
+        for _, n in ipairs(list) do
+            if tokenOk(n) and not seen[n] then
+                seen[n] = true
+                out[#out + 1] = n
+            end
+        end
+        return out
+    end
+    local ok = {}
+    for _, e in ipairs(catalog) do ok[e.name] = true end
+    for _, n in ipairs(list) do
+        if type(n) == "string" and ok[n] and not seen[n] then
+            seen[n] = true
+            out[#out + 1] = n
+        end
+    end
+    return out
+end
+
+
+function BridgeData.muscleOf(rec)
+    local n = rec ~= nil and tonumber(rec.muscle) or 0
+    if n == nil or n ~= n or n < 0 then n = 0 end
+    if n > BridgeData.MUSCLE_MAX then n = BridgeData.MUSCLE_MAX end
+    return math.floor(n)
+end
+
+
 
 
 function BridgeData.wants(rec)

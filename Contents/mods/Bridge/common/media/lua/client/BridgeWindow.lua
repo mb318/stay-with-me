@@ -75,7 +75,12 @@ end
 
 function BridgeWindow.lookKey(st)
     local items = (st ~= nil and st.items) or ""
-    return BridgeData.hairOf(st) .. "|" .. BridgeItems.lookKey(BridgeItems.decode(items))
+    local hc = BridgeData.hairColorOf(st)
+    return BridgeData.skinOf(st) .. "|" .. BridgeData.hairOf(st) .. "|"
+        .. tostring(hc.r) .. "," .. tostring(hc.g) .. "," .. tostring(hc.b) .. "|"
+        .. tostring(st ~= nil and st.face or "") .. "|" .. table.concat(BridgeData.cleanDetails(st ~= nil and st.details or nil) or {}, ",") .. "|"
+        .. tostring(BridgeData.muscleOf(st)) .. "|" .. table.concat(BridgeData.makeupOf(st), ",") .. "|"
+        .. BridgeItems.lookKey(BridgeItems.decode(items))
 end
 
 
@@ -86,9 +91,10 @@ function BridgeWindow.makeDesc(st)
     pcall(function() desc:getWornItems():clear() end)
     local hv = desc:getHumanVisual()
     pcall(function() hv:clear() end)
-    pcall(function() hv:setSkinTextureName("FemaleBody01") end)
+    pcall(function() hv:setSkinTextureName(BridgeData.skinOf(st)) end)
     pcall(function() hv:setHairModel(BridgeData.hairOf(st)) end)
-    pcall(function() hv:setHairColor(ImmutableColor.new(0.55, 0.12, 0.12)) end)
+    local hc = BridgeData.hairColorOf(st)
+    pcall(function() hv:setHairColor(ImmutableColor.new(hc.r, hc.g, hc.b)) end)
     pcall(function() hv:setBeardModel("") end)
     for _, rec in ipairs(BridgeWindow.wornRecords(st ~= nil and st.items or "")) do
         pcall(function()
@@ -101,7 +107,46 @@ function BridgeWindow.makeDesc(st)
             if loc ~= nil then desc:setWornItem(loc, item) end
         end)
     end
+    BridgeWindow.addCustomDesc(desc, st)
     return desc
+end
+
+
+function BridgeWindow.addCustomDesc(desc, st)
+    if desc == nil then return end
+    BridgeWindow.missingCustom = BridgeWindow.missingCustom or {}
+    local idx = BridgeData.skinIndex(st)
+    local function add(id, texture)
+        if type(id) ~= "string" or id == "" then return end
+        pcall(function()
+            local item = instanceItem(id)
+            if item == nil then
+                if not BridgeWindow.missingCustom[id] then
+                    BridgeWindow.missingCustom[id] = true
+                    warn("custom item type not found: " .. tostring(id))
+                end
+                return
+            end
+            local v = item:getVisual()
+            if v ~= nil and texture ~= nil then v:setBaseTexture(texture) v:setTextureChoice(texture) end
+            desc:setWornItem(item:getBodyLocation(), item)
+        end)
+    end
+    if BridgeData.spnccOn() then
+        local face = BridgeData.faceEntry(st)
+        if face ~= nil then add(face.id, BridgeData.spnccTexture(face, idx)) end
+        for _, d in ipairs(BridgeData.detailEntries(st)) do
+            add(d.id, BridgeData.spnccTexture(d, idx))
+        end
+        local m = BridgeData.muscleOf(st)
+        if m > 0 then
+            local mid = BridgeData.spnccMuscle()
+            if mid ~= nil then add(mid, idx + (m == 2 and 5 or 0)) end
+        end
+    end
+    for _, type in ipairs(BridgeData.makeupOf(st)) do
+        add(type, nil)
+    end
 end
 
 
@@ -132,11 +177,11 @@ function BridgeWindowInfo:createChildren()
 
     local change = getText("IGUI_PlayerStats_Change")
     local bw = getTextManager():MeasureStringX(UIFont.Small, change) + PAD * 2
-    self.hairBtn = ISButton:new(self.width - PAD - bw, 0, bw, BTN_H, change, self, BridgeWindowInfo.onHair)
-    self.hairBtn:initialise()
-    self.hairBtn:instantiate()
-    self.hairBtn.borderColor = { r = 1, g = 1, b = 1, a = 0.1 }
-    self:addChild(self.hairBtn)
+    self.appearBtn = ISButton:new(self.width - PAD - bw, 0, bw, BTN_H, change, self, BridgeWindowInfo.onAppearance)
+    self.appearBtn:initialise()
+    self.appearBtn:instantiate()
+    self.appearBtn.borderColor = { r = 1, g = 1, b = 1, a = 0.1 }
+    self:addChild(self.appearBtn)
 end
 
 
@@ -164,6 +209,40 @@ function BridgeWindow.hairLabel(style)
     return text or tostring(style)
 end
 
+
+
+
+BridgeWindow.REL_TICKS = { 20, 45, 75 }
+BridgeWindow.REL_BAR_H = 8
+BridgeWindow.REL_COLORS = {
+    Cold = { 0.38, 0.42, 0.50 },
+    Known = { 0.50, 0.58, 0.68 },
+    Pal = { 0.42, 0.62, 0.80 },
+    Friend = { 0.62, 0.52, 0.82 },
+    Close = { 0.86, 0.46, 0.64 },
+}
+
+function BridgeWindow.relBar(rel)
+    local f = rel ~= nil and tonumber(rel.f) or 0
+    if f == nil or f ~= f then f = 0 end
+    local fill = f / 100
+    if fill < 0 then fill = 0 elseif fill > 1 then fill = 1 end
+    local c = BridgeWindow.REL_COLORS[BridgeData.relTier(rel)] or BridgeWindow.REL_COLORS.Known
+    return fill, c[1], c[2], c[3]
+end
+
+function BridgeWindowInfo:drawRelBar(x, y, w)
+    local fill, cr, cg, cb = BridgeWindow.relBar(BridgeData.relOf(Bridge.store))
+    local h = BridgeWindow.REL_BAR_H
+    self:drawRect(x, y, w, h, 1, 0.12, 0.12, 0.12)
+    local fillW = math.floor(w * fill)
+    if fillW > 0 then self:drawRect(x, y, fillW, h, 1, cr, cg, cb) end
+    for _, t in ipairs(BridgeWindow.REL_TICKS) do
+        self:drawRect(x + math.floor(w * t / 100), y, 1, h, 1, 0.05, 0.05, 0.05)
+    end
+    self:drawRectBorder(x, y, w, h, 1, 0.35, 0.35, 0.35)
+end
+
 function BridgeWindowInfo:render()
     if Bridge == nil or Bridge.store == nil then return end
     local x, y = self.textX, PAD
@@ -172,8 +251,10 @@ function BridgeWindowInfo:render()
     y = y + FONT_M + 2
     self:drawRect(x, y, colW, 1, 1, 0.4, 0.4, 0.4)
     y = y + PAD
-    self:drawText(fitText(UIFont.Small, BridgeMenu.status(), colW), x, y, 0.75, 0.75, 0.75, 1, UIFont.Small)
-    y = y + FONT_S + PAD
+    self:drawText(fitText(UIFont.Small, BridgeMenu.status(true), colW), x, y, 0.75, 0.75, 0.75, 1, UIFont.Small)
+    y = y + FONT_S + 4
+    self:drawRelBar(x, y, colW)
+    y = y + BridgeWindow.REL_BAR_H + PAD
 
     local present = BridgeMenu.isPresent()
 
@@ -184,12 +265,20 @@ function BridgeWindowInfo:render()
     self.callBtn:setY(y)
     y = y + BTN_H + PAD * 2
 
-    self:drawText(tr("WindowHair"), x, y, 1, 1, 1, 1, UIFont.Small)
-    local hair = BridgeWindow.hairLabel(BridgeData.hairOf(Bridge.store))
-    local hairX = x + textW(UIFont.Small, tr("WindowHair")) + PAD
-    hair = fitText(UIFont.Small, hair, self.hairBtn:getX() - PAD - hairX)
-    self:drawText(hair, hairX, y, 0.6, 0.6, 0.6, 1, UIFont.Small)
-    self.hairBtn:setY(y - (BTN_H - FONT_S) / 2)
+    self:drawText(tr("WindowAppearance"), x, y, 1, 1, 1, 1, UIFont.Small)
+    local shown = tr("LookDefault")
+    if BridgeLooks ~= nil and type(BridgeLooks.shown) == "function" then
+        local n = BridgeLooks.shown(Bridge.store)
+        if type(n) == "string" and n ~= "" then shown = n end
+    end
+    local lookX = x + textW(UIFont.Small, tr("WindowAppearance")) + PAD
+    local appear = self.appearBtn
+    local room = colW - (lookX - x)
+    if type(appear) == "table" or type(appear) == "userdata" then
+        if appear.getX ~= nil then room = appear:getX() - PAD - lookX end
+        appear:setY(y - (BTN_H - FONT_S) / 2)
+    end
+    self:drawText(fitText(UIFont.Small, shown, room), lookX, y, 0.6, 0.6, 0.6, 1, UIFont.Small)
 
 
 end
@@ -224,19 +313,8 @@ function BridgeWindow.hairStyles()
     return out
 end
 
-function BridgeWindowInfo:onHair(button)
-    local x = button:getAbsoluteX()
-    local y = button:getAbsoluteY() + button:getHeight()
-    local context = ISContextMenu.get(0, x, y)
-    local now = BridgeData.hairOf(Bridge.store)
-    for _, style in ipairs(BridgeWindow.hairStyles()) do
-        local option = context:addOption(style.label, style.id, BridgeWindow.onHairPicked)
-        if style.id == now then option.isDisabled = true end
-    end
-end
-
-function BridgeWindow.onHairPicked(style)
-    Bridge.setHair(style)
+function BridgeWindowInfo:onAppearance()
+    if BridgeAppearance ~= nil then BridgeAppearance.open("body") end
 end
 
 function BridgeWindowInfo:new(x, y, width, height)
@@ -341,7 +419,7 @@ end
 
 function BridgeWindowMain:prerender()
 
-    if Bridge ~= nil and Bridge.store ~= nil then self.title = name() end
+    self.title = ""
     ISCollapsableWindow.prerender(self)
 end
 
@@ -369,18 +447,16 @@ BridgeWindow.HEIGHT = 340
 function BridgeWindow.neededSize()
     refreshFonts()
     local textX = PAD + 1 + AVATAR_BORDER + AVATAR_W + AVATAR_BORDER + PAD
-    local changeW = textW(UIFont.Small, getText("IGUI_PlayerStats_Change")) + PAD * 2
-
-    local hairW = 0
-    pcall(function() hairW = textW(UIFont.Small, BridgeWindow.hairLabel(BridgeData.hairOf(Bridge.store))) end)
     local status = ""
-    pcall(function() status = BridgeMenu.status() end)
+    pcall(function() status = BridgeMenu.status(true) end)
+
+    local lookLabel = tr("LookDefault")
     local colW = math.max(
         textW(UIFont.Medium, name()),
         textW(UIFont.Small, status),
         textW(UIFont.Small, tr("Goodbye")) + PAD * 2,
         textW(UIFont.Small, tr("Call", name())) + PAD * 2,
-        textW(UIFont.Small, tr("WindowHair")) + PAD + hairW + PAD + changeW)
+        textW(UIFont.Small, tr("WindowAppearance")) + PAD + textW(UIFont.Small, lookLabel) + PAD + textW(UIFont.Small, getText("IGUI_PlayerStats_Change")) + PAD * 2)
     local w = textX + colW + PAD
 
     local gap = UI_BORDER_SPACING or 10
@@ -390,7 +466,7 @@ function BridgeWindow.neededSize()
     w = math.max(w, PAD * 2 + textW(UIFont.Small, tr("WindowName") .. " " .. name()))
     local tickH = math.max(BTN_H, FONT_S) + gap
     local infoH = math.max(PAD * 2 + 2 + AVATAR_H + AVATAR_BORDER * 2,
-        PAD + FONT_M + 2 + PAD + FONT_S + PAD + BTN_H + PAD * 2 + BTN_H + PAD)
+        PAD + FONT_M + 2 + PAD + FONT_S + 4 + BridgeWindow.REL_BAR_H + PAD + BTN_H + PAD * 2 + BTN_H + PAD)
     local setH = PAD + #BridgeWindow.TICKS * (tickH + PAD) + PAD + FONT_S + PAD / 2 + BTN_H + PAD
     return math.max(BridgeWindow.WIDTH, math.ceil(w)), math.ceil(math.max(infoH, setH))
 end

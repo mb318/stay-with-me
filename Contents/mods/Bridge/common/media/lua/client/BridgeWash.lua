@@ -151,7 +151,7 @@ function BridgeWash.waterList(body)
         local cell = getCell()
         local bx, by, bz = math.floor(body:getX()), math.floor(body:getY()), math.floor(body:getZ())
         local home = nil
-        pcall(function() home = body:getCurrentSquare():getBuilding() end)
+        pcall(function() local sq = body:getCurrentSquare() if sq ~= nil then home = sq:getBuilding() end end)
         for dx = -RADIUS, RADIUS do
             for dy = -RADIUS, RADIUS do
                 local sq = cell:getGridSquare(bx + dx, by + dy, bz)
