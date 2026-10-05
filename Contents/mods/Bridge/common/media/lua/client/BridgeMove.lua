@@ -3261,6 +3261,49 @@ function BridgeMove.lineClear(body, gx, gy, gz)
     return ok
 end
 
+-- Bounded flood-fill from the body's square to (tx,ty,tz), treating fences/windows
+-- (stepNeedsClimb), doors (isDoorTo), walls (isBlockedTo) and vehicles as impassable.
+-- Lets combat refuse a target she could only reach by vaulting or opening a door, and
+-- still accept one reachable by walking around. Returns true when a route exists.
+function BridgeMove.walkReach(body, tx, ty, tz, maxNodes)
+    local ok = false
+    pcall(function()
+        local cell = getCell()
+        local bz = math.floor(body:getZ())
+        if math.floor(tz) ~= bz then return end
+        local bx, by = math.floor(body:getX()), math.floor(body:getY())
+        tx, ty = math.floor(tx), math.floor(ty)
+        if bx == tx and by == ty then ok = true return end
+        local start = cell:getGridSquare(bx, by, bz)
+        if start == nil then return end
+        local budget = maxNodes or 240
+        local dirs = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
+        local seen = { [bx .. "," .. by] = true }
+        local queue, head = { start }, 1
+        local visited = 0
+        while head <= #queue and visited < budget do
+            local cur = queue[head]
+            head = head + 1
+            visited = visited + 1
+            local cx, cy = cur:getX(), cur:getY()
+            for i = 1, 4 do
+                local nx, ny = cx + dirs[i][1], cy + dirs[i][2]
+                local key = nx .. "," .. ny
+                if not seen[key] then
+                    local nb = cell:getGridSquare(nx, ny, bz)
+                    if nb ~= nil and not cur:isBlockedTo(nb) and nb:isFree(false)
+                        and not stepNeedsClimb(cur, nb) and not cur:isDoorTo(nb) and not underCar(nb) then
+                        if nx == tx and ny == ty then ok = true return end
+                        seen[key] = true
+                        queue[#queue + 1] = nb
+                    end
+                end
+            end
+        end
+    end)
+    return ok
+end
+
 
 function BridgeMove.traceFrame(body, d, needPath, stalled)
     if Bridge.tick < BridgeMove.traceUntil then

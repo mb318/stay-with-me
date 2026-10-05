@@ -180,6 +180,15 @@ function BridgeServer.isCompanionBody(z)
 end
 
 
+function BridgeServer.isCompanionId(pid)
+    if type(pid) ~= "number" or pid == 0 then return false end
+    if not BridgeServer.hasMark(pid) then return false end
+    local known = false
+    pcall(function() known = issuedMap()[pid] ~= nil end)
+    return known
+end
+
+
 local function outfitIdTaken(body, pid)
     local md = world()
     for _, rec in pairs(md.players) do
@@ -206,36 +215,21 @@ end
 
 
 
-local TRIP_IGNORE = 1000000000
-local trippingOn = nil
-
-local function tripModOn()
-    if trippingOn == nil then
-        trippingOn = false
-        pcall(function()
-            local mods = getActivatedMods()
-            trippingOn = mods:contains("TrippingZombies") or mods:contains("\\TrippingZombies")
-        end)
-        if trippingOn then log("Tripping Zombies detected: companion trip suppression on") end
-    end
-    return trippingOn
-end
-
 local function markHuman(body)
     pcall(function() body:setVariable("SurvivorNPC", true) end)
+    pcall(function() body:setVariable("NotAloneBody", true) end)
     pcall(function() body:getModData().notAloneBody = true end)
 
 
     pcall(function() body:getModData().ST_Ignore = true end)
-    pcall(function() body:getModData().tzCooldown = TRIP_IGNORE end)
     pcall(function() body:getModData().RandomZedsExcluded = true end)
 end
 
 local function unmarkHuman(body)
     pcall(function() body:clearVariable("SurvivorNPC") end)
+    pcall(function() body:clearVariable("NotAloneBody") end)
     pcall(function() body:getModData().notAloneBody = nil end)
     pcall(function() body:getModData().ST_Ignore = nil end)
-    pcall(function() body:getModData().tzCooldown = nil end)
     pcall(function() body:getModData().RandomZedsExcluded = nil end)
 end
 
@@ -377,7 +371,10 @@ BridgeServer.Commands = {}
 local function createBody(x, y, z)
     local body, failed = nil, nil
     for attempt = 1, 8 do
-        local list = addZombiesInOutfit(x, y, z, 1, "Naked", 100, false, false, false, false, false, false, 1)
+        BridgeServer.creating = true
+        local okSpawn, list = pcall(addZombiesInOutfit, x, y, z, 1, "Naked", 100, false, false, false, false, false, false, 1)
+        BridgeServer.creating = false
+        if not okSpawn then return nil, "addZombiesInOutfit failed: " .. tostring(list) end
         if list == nil or list:size() == 0 then return nil, "addZombiesInOutfit returned nothing" end
         local candidate = list:get(0)
 
@@ -1566,6 +1563,7 @@ local function onZombieCreate(z)
         pcall(function() z:setInvulnerable(false) end)
         pcall(function() z:setNoTeeth(false) end)
     end
+    if BridgeServer.creating then markHuman(z) end
     local pid = nil
     pcall(function() pid = z:getPersistentOutfitID() end)
 
@@ -2061,12 +2059,6 @@ local function onTick()
         if on ~= BridgeServer.verbose then
             BridgeServer.verbose = on
             log("verbose log " .. (on and "on" or "off"))
-        end
-    end
-
-    if BridgeServer.newSecond and sec % 10 == 0 and tripModOn() then
-        for _, b in pairs(BridgeServer.bodies) do
-            pcall(function() b:getModData().tzCooldown = TRIP_IGNORE end)
         end
     end
 
