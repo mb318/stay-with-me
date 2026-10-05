@@ -3261,10 +3261,6 @@ function BridgeMove.lineClear(body, gx, gy, gz)
     return ok
 end
 
--- Bounded flood-fill from the body's square to (tx,ty,tz), treating fences/windows
--- (stepNeedsClimb), doors (isDoorTo), walls (isBlockedTo) and vehicles as impassable.
--- Lets combat refuse a target she could only reach by vaulting or opening a door, and
--- still accept one reachable by walking around. Returns true when a route exists.
 function BridgeMove.walkReach(body, tx, ty, tz, maxNodes)
     local ok = false
     pcall(function()
@@ -4351,13 +4347,13 @@ local function climbCost(kind)
 end
 
 
+
+
 local function squareFloor(sq)
     if sq == nil then return nil end
     local known = nil
-    pcall(function() known = sq:hasFloor(false) or sq:hasFloor(true) end)
-    if known == nil then
-        pcall(function() known = sq:getFloor() ~= nil end)
-    end
+    pcall(function() known = sq:TreatAsSolidFloor() end)
+    if known == nil then pcall(function() known = sq:hasFloor() end) end
     return known
 end
 
@@ -4372,7 +4368,7 @@ function BridgeMove.vaultSafe(body, from, to)
     end)
     if offStairs then return false, "vaults off the staircase" end
     if math.floor(from:getZ()) <= 0 then return true end
-    if squareFloor(to) == false then return false, "far side is open air" end
+    if squareFloor(to) ~= true then return false, "far side is open air" end
     return true
 end
 
@@ -4550,6 +4546,7 @@ local function shiftCross(body, c, cur)
     if to == nil then return false end
     local kind, object = BridgeMove.edgeBetween(body, cur, to)
     if kind == nil or (kind == "tall") ~= (c.kind == "tall") then return false end
+    if not BridgeMove.vaultSafe(body, cur, to) then return false end
     if not farSideJoined(body, c.to, to) then return false end
     log(sformat("cross %s shifted: from %d,%d to %d,%d", kind, cur:getX(), cur:getY(), to:getX(), to:getY()))
     c.from, c.to, c.kind, c.object = cur, to, kind, object
@@ -5328,7 +5325,6 @@ function BridgeMove.update(body)
         return
     end
 
-    -- Player is aiming a gun through her: get behind him before the follow logic.
     if BridgeAim ~= nil and BridgeAim.step(body, BridgeData.owner()) then
         trackStep(body)
         return

@@ -22,6 +22,15 @@ local function tr(key, a)
     return text
 end
 
+
+local function tip(option, text)
+    pcall(function()
+        local t = ISInventoryPaneContextMenu.addToolTip()
+        t.description = text
+        option.toolTip = t
+    end)
+end
+
 local function name() return Bridge.companionName() end
 
 
@@ -246,11 +255,14 @@ function BridgeMenu.fill(context, playerNum, fromIcon)
     end
     actions:addOption(tr("Goodbye"), nil, BridgeMenu.onGoodbye)
 
+
+
     local combatOption = context:addOption(tr("Combat"))
     local guard = false
     pcall(function() if BridgeFight ~= nil then guard = BridgeFight.guardOnly end end)
     if guard then
         combatOption.isDisabled = true
+        tip(combatOption, tr("CombatGuardTip"))
     else
         local combat = ISContextMenu:getNew(context)
         context:addSubMenu(combatOption, combat)
@@ -259,6 +271,7 @@ function BridgeMenu.fill(context, playerNum, fromIcon)
             { "aggressive", "CombatAggressive" } }) do
             local o = combat:addOption(tr(entry[2]), entry[1], BridgeMenu.onCombat)
             if combatMode == entry[1] then o.isDisabled = true end
+            tip(o, tr(entry[2] .. "Tip"))
         end
     end
 

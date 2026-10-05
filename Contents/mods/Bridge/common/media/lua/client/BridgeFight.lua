@@ -33,9 +33,6 @@ local HIT_REACTION = {
     Attack2HFloorB = "Floor", AttackS1FloorB = "Floor", AttackS1B = "HeadRight", AttackS2B = "HeadRight",
 }
 
--- Reactions applied when the swing is a critical hit (a melee "head shot"). The base
--- game swaps to a *Crit animation and fires these lethal reactions; the mod already
--- ships the matching zombie animsets (falldown-speardeath1/2, falldown-knifedeath).
 local CRIT_REACTION = {
     AttackS1 = "HitSpearDeath1", AttackS2 = "HitSpearDeath1",
     AttackS1B = "HitSpearDeath1", AttackS2B = "HitSpearDeath1",
@@ -107,29 +104,17 @@ local TIRED_DAMAGE = 0.25
 local PICK_EVERY = 10
 local APPROACH_MAX = 150
 local BLACKLIST_TICKS = 900
-
---=============================================================================
--- feature toggles (1 = on, 0 = off)
---=============================================================================
-local MULTIHIT_ON       = 1 -- let her melee cleave when the world "Weapon Multi Hit" option is on
-local HEAD_TARGET_ON    = 1 -- aim for the head on downed zombies (fatigue + rng)
-local NO_CLIMB_ON       = 1 -- never commit to a target she can only reach by vaulting or opening a door
-local COMBATTEXT_ON     = 1 -- feed her hits to the Combat Text mod, when it is loaded (soft support)
-local CRIT_KNOCKDOWN_ON = 1 -- critical hits knock the zombie down, like vanilla
-local GROUND_BONUS_ON   = 1 -- vanilla ground-attack damage bonus when hitting a downed zombie
-
--- Multi-hit safety cap, head-aim and audio tuning.
-local CRIT_SOUND_VOL       = 2.0 -- instance volume multiplier for the crit head foley
-local MULTIHIT_MAX         = 4   -- never cleave more than this many zombies in one swing
-local HEAD_STOMP_BASE      = 70  -- unarmed stomp head chance %, fully rested
-local HEAD_FLOOR_BASE      = 40  -- armed floor-attack head chance %, fully rested
-local HEAD_FATIGUE_PENALTY = 45  -- max percentage points lost at full fatigue
-local HEAD_MIN             = 5   -- head chance floor
-local REACH_TTL            = 120 -- ticks a reachability result is reused
-local REACH_NODES          = 240 -- flood-fill budget for the no-climb reachability test
-local STUCK_TICKS          = 60  -- approach ticks with no movement before giving up
-local STUCK_MOVE           = 0.4 -- tiles of movement that count as progress
-local REACH_CACHE_MAX      = 400 -- hard cap on cached reachability results
+local MULTIHIT_ON = 1
+local NO_CLIMB_ON = 1
+local COMBATTEXT_ON = 1
+local GROUND_BONUS_ON = 1
+local MULTIHIT_MAX = 4
+local HEAD_SPLIT = 3.0
+local REACH_TTL = 120
+local REACH_NODES = 240
+local STUCK_TICKS = 60
+local STUCK_MOVE = 0.4
+local REACH_CACHE_MAX = 400
 local reachCache = setmetatable({}, { __mode = "k" })
 local reachCacheN = 0
 
@@ -212,8 +197,6 @@ local function attackAnims(item, prone, crit)
         return { "Attack1H1", "Attack1H2", "Attack1H3", "Attack1H4", "Attack1H5" }, item:getSwingSound()
     elseif kind == WeaponType.SPEAR then
         if prone then return { "AttackS1Floor" }, item:getSwingSound() end
-        -- AttackS2 is Bob_AttackSpear01_CritHit, the same animation the base game's
-        -- SpearStab / SpearOverheadCrit uses. Reserve it for real critical hits.
         if crit then return { "AttackS2" }, item:getSwingSound() end
         return { "AttackS1" }, item:getSwingSound()
     elseif kind == WeaponType.KNIFE then
@@ -226,8 +209,6 @@ end
 
 local function isProne(z)
     local asn = z:getActionStateName()
-    -- Crawlers (broken legs) count as floor targets too, so she stomps/floor-stabs
-    -- them and can aim for the head instead of swinging at them standing.
     local crawl = false
     pcall(function() crawl = z:isCrawling() end)
     return z:isProne() or crawl or asn == "onground" or asn == "sitonground"
@@ -278,7 +259,6 @@ local function swingFrames(item)
     len = math.floor(len * (1 + TIRED_SWING * BridgeFight.fatigue) + 0.5)
     return len, math.floor(len * 0.45 + 0.5)
 end
-BridgeFight.swingFrames = swingFrames
 
 
 
@@ -372,8 +352,6 @@ local function rest(busy)
     sayFatigue()
 end
 
--- Critical-hit roll. Done once at swing start so the animation and the reaction can
--- both follow it, then reused by hitTarget (and any multi-hit extras of that swing).
 local function critRoll(item)
     local critChance, critMult = 0, 1
     pcall(function() critChance = item:getCriticalChance() end)
@@ -384,11 +362,7 @@ local function critRoll(item)
     return ZombRand(100) < critChance, critChance, critMult
 end
 
--- The zombie head-hit foley the base game plays on a critical / head hit. The engine
--- picks it by damage type: blunt crunches (HeadSmash), stabs squelch (HeadStab),
--- blades slice (HeadSlice). Spears and knives count as stabs. These names are defined
--- in sounds_staywithme.txt and reuse the vanilla FMOD events with a wider range/volume.
-local function critSound(item)
+local function headSound(item)
     local kind = nil
     pcall(function() kind = WeaponType.getWeaponType(item) end)
     if kind == WeaponType.SPEAR or kind == WeaponType.KNIFE then return "NA_HeadStab" end
@@ -399,10 +373,6 @@ local function critSound(item)
     return "NA_HeadSmash"
 end
 
--- Soft Combat Text support: push her hits into Combat Text's own tracking list so its
--- managers draw the damage number and zombie health bar, exactly as they do for the
--- player. No-ops unless the Combat Text mod is loaded (its global cache is present).
--- Called BEFORE the damage lands, so Combat Text sees the pre-hit HP and shows a delta.
 local function combatTextHit(victim, item, crit)
     if COMBATTEXT_ON ~= 1 then return end
     if CombatTextCache == nil or CombatTextCache.TrackingList == nil then return end
@@ -429,7 +399,7 @@ local function combatTextHit(victim, item, crit)
     end)
 end
 
-local function hitTarget(body, item, victim, noMiss)
+local function hitTarget(body, item, victim, noMiss, fixedDmg)
     local fake = getCell():getFakeZombieForHit()
     local range = item:getMaxRange()
     local d = dist(body, victim)
@@ -438,8 +408,6 @@ local function hitTarget(body, item, victim, noMiss)
     if victim:isOnKillDone() then return "miss killdone" end
     if wallBetween(body, victim) then return "miss wall" end
 
-    -- noMiss: secondary targets of a multi-hit swing ride the primary target's hit
-    -- roll, so they skip the per-target miss check (and its crowd scan).
     local miss = 0
     if not noMiss then
         miss = missChance(body)
@@ -452,13 +420,6 @@ local function hitTarget(body, item, victim, noMiss)
     victim:setHitFromBehind(behind)
     victim:setAttackedBy(fake)
 
-    local dmgMin, dmgMax = 0.3, 1.0
-    pcall(function() dmgMin = item:getMinDamage() end)
-    pcall(function() dmgMax = item:getMaxDamage() end)
-    local dmg = dmgMin + (dmgMax - dmgMin) * ZombRandFloat(0, 1)
-    local rawDmg = dmg
-
-    -- Crit was rolled at swing start so the animation could follow it; reuse it here.
     local crit, critChance, critMult
     if BridgeFight.swingCrit ~= nil then
         crit = BridgeFight.swingCrit
@@ -467,41 +428,39 @@ local function hitTarget(body, item, victim, noMiss)
     else
         crit, critChance, critMult = critRoll(item)
     end
-    if crit then dmg = dmg * critMult end
-
-    dmg = dmg * (0.3 + 0.1 * SKILL_LEVEL) / 0.3
-
-    dmg = dmg * (1 - TIRED_DAMAGE * BridgeFight.fatigue)
-    -- Vanilla ground-attack bonus: hitting a downed zomboid multiplies damage by the
-    -- weapon's critical multiplier or 5, whichever is greater (and it stacks with a
-    -- crit, so a crit on the floor applies the multiplier twice).
-    if GROUND_BONUS_ON == 1 and isProne(victim) then
-        dmg = dmg * math.max(critMult, 5)
+    local dmg, rawDmg
+    local headFloor = false
+    if type(fixedDmg) == "number" then
+        dmg = fixedDmg
+        rawDmg = BridgeFight.lastRawDmg or fixedDmg
+    else
+        local dmgMin, dmgMax = 0.3, 1.0
+        pcall(function() dmgMin = item:getMinDamage() end)
+        pcall(function() dmgMax = item:getMaxDamage() end)
+        dmg = dmgMin + (dmgMax - dmgMin) * ZombRandFloat(0, 1)
+        rawDmg = dmg
+        if crit then dmg = dmg * math.max(2, critMult) end
+        dmg = dmg * (0.3 + 0.1 * SKILL_LEVEL) / 0.3
+        dmg = dmg * (1 - TIRED_DAMAGE * BridgeFight.fatigue)
+        if GROUND_BONUS_ON == 1 and BridgeFight.floorSwing then
+            dmg = dmg * math.max(critMult, 5)
+        end
+        if BridgeFight.floorSwing then
+            headFloor = ZombRand(2) > 0
+            if headFloor then dmg = dmg * HEAD_SPLIT end
+        end
+        BridgeFight.lastRawDmg = rawDmg
+        BridgeFight.lastHitDmg = dmg
     end
+    BridgeFight.lastHead = headFloor
     local hpBefore = 0
     pcall(function() hpBefore = victim:getHealth() end)
     victim:setPlayerAttackPosition(victim:testDotSide(body))
-    -- Head aim on a downed zombie: an unarmed stomp goes for the head far more often
-    -- than an armed floor swing, and the chance falls as she tires. The engine reads
-    -- these flags in processHitDamage/hitConsequences.
-    local headFloor = false
-    if HEAD_TARGET_ON == 1 and isProne(victim) then
-        local bare = false
-        pcall(function()
-            bare = item:getFullType() == "Base.BareHands" or WeaponType.getWeaponType(item) == WeaponType.UNARMED
-        end)
-        local base = bare and HEAD_STOMP_BASE or HEAD_FLOOR_BASE
-        local chance = base - HEAD_FATIGUE_PENALTY * BridgeFight.fatigue
-        if chance < HEAD_MIN then chance = HEAD_MIN end
-        headFloor = ZombRand(100) < chance
-    end
-    BridgeFight.lastHead = headFloor
     pcall(function() victim:setHitHeadWhileOnFloor(headFloor and 1 or 0) end)
     pcall(function() victim:setHitLegsWhileOnFloor(false) end)
 
 
     local reaction = HIT_REACTION[BridgeFight.anim or ""] or ""
-    -- A crit swaps in the lethal head reaction (spear / knife), matching the base game.
     if crit then
         local cr = CRIT_REACTION[BridgeFight.anim or ""]
         if cr ~= nil then reaction = cr end
@@ -518,51 +477,30 @@ local function hitTarget(body, item, victim, noMiss)
         end)
     end
     BridgeFight.lastReaction = reaction
-    -- Tell Combat Text about the hit before the damage lands so it can show the delta.
     combatTextHit(victim, item, crit)
-    -- Critical hits play the zombie head-hit foley (the base game's crit "crunch").
-    -- Play it before the blow so the victim still exists to carry the sound.
-    BridgeFight.lastCritSound = nil
-    if crit then
-        local cs = critSound(item)
-        if cs ~= nil then
+    BridgeFight.lastHeadSound = nil
+    if headFloor then
+        local hs = headSound(item)
+        if hs ~= nil then
             pcall(function()
                 local em = victim:getEmitter()
-                if em ~= nil then
-                    local id = em:playSound(cs)
-                    -- Vanilla-range event, boosted so the impact still cuts through.
-                    if id ~= nil and id ~= 0 then em:setVolume(id, CRIT_SOUND_VOL) end
-                end
+                if em ~= nil then em:playSound(hs) end
             end)
-            BridgeFight.lastCritSound = cs
+            BridgeFight.lastHeadSound = hs
         end
     end
-    -- NOTE: we deliberately do NOT set the crit flag on the (fake) wielder. The engine's
-    -- processHitDamage would then apply the weapon's crit multiplier a second time on
-    -- top of the manual one above. Crit knockdown is applied explicitly below instead.
     victim:Hit(item, fake, dmg, false, 1, false)
 
     pcall(function() BridgeCallout.kill(victim) end)
-
-    -- Vanilla crits knock the target down, when it survives the blow.
-    if crit and CRIT_KNOCKDOWN_ON == 1 then
-        pcall(function()
-            if not victim:isDead() and victim:getHealth() > 0 then victim:setKnockedDown(true) end
-        end)
-    end
-
-    local hitPart = "?"
-    pcall(function() hitPart = tostring(victim:getLastHitPart()) end)
-    BridgeFight.lastHitPart = hitPart
 
     tire(item, rawDmg, hpBefore, isProne(victim), body)
     pcall(function() victim:playSound(item:getZombieHitSound()) end)
 
     pcall(function()
-        vlog(string.format("hit %s dmg=%.2f%s hp=%.2f->%.2f f=%.3f (+%.4f) miss=%.0f%% crit=%.0f%% crowd=%d head=%s part=%s reaction=%s snd=%s", tostring(item:getType()),
+        vlog(string.format("hit %s dmg=%.2f%s hp=%.2f->%.2f f=%.3f (+%.4f) miss=%.0f%% crit=%.0f%% crowd=%d head=%s reaction=%s snd=%s", tostring(item:getType()),
             dmg, crit and " CRIT" or "", hpBefore, victim:getHealth(), BridgeFight.fatigue, BridgeFight.lastTire or 0, miss, critChance, BridgeFight.crowd,
-            tostring(headFloor), tostring(BridgeFight.lastHitPart or "?"), BridgeFight.lastReaction ~= "" and tostring(BridgeFight.lastReaction) or "stagger",
-            tostring(BridgeFight.lastCritSound or "-")))
+            tostring(BridgeFight.lastHead), BridgeFight.lastReaction ~= "" and tostring(BridgeFight.lastReaction) or "stagger",
+            tostring(BridgeFight.lastHeadSound or "-")))
     end)
 
 
@@ -589,9 +527,7 @@ end
 BridgeFight.visible = visible
 
 
--- Can she WALK to this target without vaulting a fence/window or opening a door?
--- Cheap straight-line test first; only when that fails do a bounded flood-fill that
--- treats climb edges and doors as walls. Cached per target so a pick does not redo it.
+
 function BridgeFight.reachable(body, z)
     local ok = true
     pcall(function()
@@ -654,6 +590,8 @@ local function pickTarget(body, red, mode)
     mode = mode or BridgeFight.mode()
     local list = getCell():getZombieList()
     local best, bestD = nil, math.huge
+    local reach = 1.0
+    pcall(function() reach = weapon(body):getMaxRange() end)
     for i = 0, list:size() - 1 do
         local z = list:get(i)
 
@@ -692,21 +630,19 @@ local function pickTarget(body, red, mode)
 
 
 
-        if z ~= nil and not banned and not busy and not isBody(z) and not remoteZombie(z) and z:isAlive() and z:getHealth() > 0
+        local isRemote = z ~= nil and remoteZombie(z)
+        if z ~= nil and not banned and not busy and not isBody(z) and z:isAlive() and z:getHealth() > 0
             and not BridgeFight.ownerRisen(z, red)
             and math.abs(z:getZ() - red:getZ()) < 0.8 and not BridgeData.harmless(z) and visible(z, red) then
             local dRed = dist(z, red)
             local dSelf = dist(z, body)
-            local near = dSelf < mode.engageSelf or (not BridgeFight.guardOnly and dRed < mode.engageRed)
+            local remoteOk = (not isRemote) or dSelf <= reach + 0.3
+            local near = remoteOk and (dSelf < mode.engageSelf or (not BridgeFight.guardOnly and dRed < mode.engageRed))
             if near then
                 local score = BridgeFight.threat(z, body, red, mode)
-                -- Prefer zombies outside the player's gun line; an in-cone one is only
-                -- taken when nothing better exists (and only if she can reach it).
                 if BridgeAim ~= nil and BridgeAim.zone.on and BridgeAim.inCone(z:getX(), z:getY(), z:getZ()) then
                     score = score + (BridgeAim.TARGET_PENALTY or 30)
                 end
-                -- Only run the (possibly costly) reachability test for a candidate that
-                -- would actually become the new best, and only when the guard is on.
                 if score < bestD and (NO_CLIMB_ON == 0 or BridgeFight.reachable(body, z)) then
                     best, bestD = z, score
                 end
@@ -731,7 +667,15 @@ local function validTarget(z, body, red, mode)
     if z == nil then return false end
     if BridgeFight.ownerRisen(z, red) then return false end
     local ok, alive = pcall(function() return z:isAlive() and z:getHealth() > 0 and not z:isOnKillDone() end)
-    if not ok or not alive or remoteZombie(z) or BridgeData.harmless(z) then return false end
+    if not ok or not alive or BridgeData.harmless(z) then return false end
+    if remoteZombie(z) then
+        local reach = 1.0
+        pcall(function() reach = weapon(body):getMaxRange() end)
+        if dist(z, body) > reach + 0.3 then
+            BridgeFight.info = "target remote, out of reach"
+            return false
+        end
+    end
 
 
 
@@ -760,8 +704,6 @@ local function validTarget(z, body, red, mode)
         local d = mode.rank == "self" and dist(z, body) or dist(z, red)
         if d > mode.targetMax then return false end
     end
-    -- A zombie inside the player's gun line is only valid if she can hit it from
-    -- where she stands (attack from the edge); never chase one into the line.
     if BridgeAim ~= nil and BridgeAim.zone.on and BridgeAim.inCone(z:getX(), z:getY(), z:getZ()) then
         local reach = 0
         pcall(function() reach = weapon(body):getMaxRange() end)
@@ -835,13 +777,6 @@ local function watchCrawlers(body, red)
     end)
 end
 
-
---=============================================================================
--- multi-hit
---=============================================================================
--- Cap for a weapon, read once per weapon type. getMaxHitCount() is the script's
--- MaxHitcount (1 = single target, 2-3 for cleaving melee, 9 on shotguns which she
--- never uses). Clamped for safety so a modded weapon cannot sweep the whole horde.
 local hitCapCache = {}
 local function hitCap(item)
     local key = nil
@@ -856,8 +791,6 @@ local function hitCap(item)
 end
 BridgeFight.hitCap = hitCap
 
--- Every zombie the swing could also reach: in range, inside the weapon's facing
--- cone, no wall between, and never the player or another companion.
 local function extraTargets(body, item, primary, want)
     local out = {}
     if want <= 0 then return out end
@@ -895,18 +828,18 @@ local function extraTargets(body, item, primary, want)
     return out
 end
 
--- Resolve the rest of a multi-hit swing. Runs ONCE per swing, at the same hit
--- moment as the primary, and only when the world "Weapon Multi Hit" option is on
--- and the weapon can actually cleave. Prone (stomp/floor) targets stay single.
 function BridgeFight.multiHit(body, item, primary)
     if MULTIHIT_ON ~= 1 then return end
     if not (SandboxVars and SandboxVars.MultiHitZombies) then return end
-    if isProne(primary) then return end
+    if BridgeFight.floorSwing or isProne(primary) then return end
     local cap = hitCap(item)
     if cap <= 1 then return end
+    local primaryDmg = BridgeFight.lastHitDmg
+    if type(primaryDmg) ~= "number" then return end
     local extras = extraTargets(body, item, primary, cap - 1)
     for i = 1, #extras do
-        pcall(function() hitTarget(body, item, extras[i], true) end)
+        local k = i + 1
+        pcall(function() hitTarget(body, item, extras[i], true, primaryDmg / k) end)
     end
     if #extras > 0 then
         vlog(string.format("multi-hit: %d extra target(s) (cap %d)", #extras, cap))
@@ -919,9 +852,7 @@ function BridgeFight.update(body)
     local red = BridgeData.owner()
     if red == nil then return false end
 
-    -- Aiming a gun through her outranks fighting: get behind him first.
     if BridgeAim ~= nil and BridgeAim.step(body, red) then return true end
-
     local mode = BridgeFight.mode()
     watchCrawlers(body, red)
 
@@ -980,7 +911,6 @@ function BridgeFight.update(body)
                     pcall(function() st = tostring(t:getActionStateName()) crawl = t:isCrawling() end)
                     vlog("swing " .. BridgeFight.info .. " target state=" .. st .. " crawling=" .. tostring(crawl))
                 else
-                    -- primary connected: let the swing carry into any extra targets
                     pcall(function() BridgeFight.multiHit(body, w, t) end)
                 end
             else
@@ -1001,6 +931,8 @@ function BridgeFight.update(body)
         return true
     end
 
+
+
     if BridgeFight.target ~= nil and (Bridge.time - BridgeFight.lastPick) >= PICK_EVERY
         and validTarget(BridgeFight.target, body, red, mode) then
         BridgeFight.lastPick = Bridge.time
@@ -1014,6 +946,7 @@ function BridgeFight.update(body)
             BridgeFight.state = "idle"
         end
     end
+    local picked = false
     if not validTarget(BridgeFight.target, body, red, mode) then
         BridgeFight.target = nil
 
@@ -1028,7 +961,7 @@ function BridgeFight.update(body)
         BridgeFight.target = z
         if z == nil then return false end
         BridgeFight.info = "target picked"
-        pcall(function() BridgeCallout.engage(z) end)
+        picked = true
 
 
 
@@ -1065,6 +998,8 @@ function BridgeFight.update(body)
         return false
     end
 
+    if picked then pcall(function() BridgeCallout.engage(t) end) end
+
     local walled = d <= range + 0.1 and wallBetween(body, t)
     if d > range + 0.1 or walled then
         if walled then BridgeFight.info = "target behind wall" end
@@ -1086,9 +1021,6 @@ function BridgeFight.update(body)
             BridgeMove.stopPath(body)
             return false
         end
-
-        -- Bail out early if she is grinding against a wall/fence instead of pathing
-        -- around it. Resets whenever she actually makes progress.
         local adx = body:getX() - (BridgeFight.approachX or body:getX())
         local ady = body:getY() - (BridgeFight.approachY or body:getY())
         if math.sqrt(adx * adx + ady * ady) < STUCK_MOVE then
@@ -1116,6 +1048,7 @@ function BridgeFight.update(body)
 
         pcall(function() BridgeMove.endFollowBump(body, "") end)
         pcall(function() BridgeMove.setCollide(body, true) end)
+
         pcall(function() BridgeMove.goToward(body, t:getX(), t:getY(), t:getZ()) end)
         return true
     end
@@ -1132,11 +1065,11 @@ function BridgeFight.update(body)
         end
     end)
     pcall(function() body:faceLocationF(t:getX(), t:getY()) end)
-    -- Roll the crit now so the swing can pick the crit animation, and so hitTarget
-    -- uses the same roll for damage, reaction and sound.
     local crit, critChance, critMult = critRoll(item)
     BridgeFight.swingCrit, BridgeFight.swingCritChance, BridgeFight.swingCritMult = crit, critChance, critMult
-    local anims, swingSound = attackAnims(item, isProne(t), crit)
+    local prone = isProne(t)
+    BridgeFight.floorSwing = prone == true
+    local anims, swingSound = attackAnims(item, prone, crit)
     local anim = anims[1 + ZombRand(#anims)]
 
 

@@ -26,6 +26,23 @@ local function textW(font, text)
     return w or 0
 end
 
+local function fitText(font, text, maxW)
+    text = tostring(text or "")
+    if maxW <= 0 or textW(font, text) <= maxW then return text end
+    local ell = "..."
+    if textW(font, ell) > maxW then return "" end
+    local n = #text
+    while n > 0 and textW(font, string.sub(text, 1, n) .. ell) > maxW do
+        n = n - 1
+        local b = string.byte(text, n + 1)
+        while n > 0 and b ~= nil and b >= 128 and b < 192 do
+            n = n - 1
+            b = string.byte(text, n + 1)
+        end
+    end
+    return string.sub(text, 1, n) .. ell
+end
+
 local function log(text) if BridgeLog ~= nil and BridgeLog.on() then print("[BridgeAppearance] " .. tostring(text)) end end
 local function warn(text) print("[BridgeAppearance] " .. tostring(text)) end
 
@@ -41,6 +58,13 @@ local function gameText(key, fallback)
     local text = nil
     pcall(function() text = getTextOrNull(key) end)
     if text == nil or text == "" then return fallback end
+    return text
+end
+
+local function vanillaText(key, fallback)
+    if type(getTextOrNull) ~= "function" then return fallback end
+    local text = getTextOrNull(key)
+    if type(text) ~= "string" or text == "" or text == key then return fallback end
     return text
 end
 
@@ -329,8 +353,8 @@ end
 
 local function gridButton(view, i, cols, onClick)
     local bw = math.floor((view.width - PAD * (cols + 1)) / cols)
-    local col = (i - 1) % cols
     local row = math.floor((i - 1) / cols)
+    local col = (i - 1) - row * cols
     local b = ISButton:new(PAD + col * (bw + PAD), PAD + FONT_S + PAD + row * (BTN_H + 6), bw, BTN_H + 2,
         "", view, onClick)
     b:initialise()
@@ -361,7 +385,7 @@ local function pagerRefresh(view, selectedName, isSelected)
     for i, b in ipairs(view.btns) do
         local e = view.entries[start + i]
         if e ~= nil then
-            b:setTitle(e.label)
+            b:setTitle(fitText(b.font or UIFont.Small, e.label, b.width or 0))
             b:setEnable(true)
             b.entryName = e.name or e.id
             mark(b, isSelected(b.entryName))
@@ -384,7 +408,7 @@ BridgeAppearanceFace = ISPanel:derive("BridgeAppearanceFace")
 function BridgeAppearanceFace:createChildren()
     ISPanel.createChildren(self)
     self.entries = BridgeAppearance.Catalog.faceEntries()
-    self.cols, self.rows = 3, 4
+    self.cols, self.rows = 2, 4
     self.per = self.cols * self.rows
     self.page = 1
     self.pageText = "1 / 1"
@@ -426,7 +450,7 @@ BridgeAppearanceDetails = ISPanel:derive("BridgeAppearanceDetails")
 function BridgeAppearanceDetails:createChildren()
     ISPanel.createChildren(self)
     self.entries = BridgeAppearance.Catalog.detailEntries()
-    self.cols, self.rows = 3, 4
+    self.cols, self.rows = 2, 4
     self.per = self.cols * self.rows
     self.page = 1
     self.pageText = "1 / 1"
@@ -479,7 +503,7 @@ BridgeAppearanceHair = ISPanel:derive("BridgeAppearanceHair")
 function BridgeAppearanceHair:createChildren()
     ISPanel.createChildren(self)
     self.entries = BridgeAppearance.Catalog.hairEntries()
-    self.cols, self.rows = 3, 4
+    self.cols, self.rows = 2, 4
     self.per = self.cols * self.rows
     self.page = 1
     self.pageText = "1 / 1"
@@ -719,6 +743,32 @@ function BridgeAppearance.Window:createChildren()
     self.closeBtn:initialise()
     self.closeBtn:instantiate()
     self:addChild(self.closeBtn)
+    local gap = PAD
+    local saveText = vanillaText("UI_characreation_BuildSave", "Save")
+    local delText = vanillaText("UI_characreation_BuildDel", "Del")
+    local saveW = math.max(50, textW(UIFont.Small, saveText) + PAD * 2)
+    local delW = math.max(50, textW(UIFont.Small, delText) + PAD * 2)
+    local limit = self.applyBtn:getX() - gap
+
+    local comboW = math.min(PREVIEW_W, limit - PAD - saveW - delW - gap * 2)
+    if comboW < 80 then comboW = 80 end
+    self.lookCombo = ISComboBox:new(PAD, by, comboW, BTN_H, self, BridgeAppearance.Window.onLook)
+    self.lookCombo:initialise()
+    self.lookCombo.openUpwards = true
+    self.lookCombo.noSelectionText = ""
+    self:addChild(self.lookCombo)
+    self.saveBtn = ISButton:new(PAD + comboW + gap, by, saveW, BTN_H, saveText, self, BridgeAppearance.Window.onSave)
+    self.saveBtn:initialise()
+    self.saveBtn:instantiate()
+    if self.saveBtn.enableAcceptColor ~= nil then self.saveBtn:enableAcceptColor() end
+    self:addChild(self.saveBtn)
+    self.deleteBtn = ISButton:new(self.saveBtn:getX() + self.saveBtn:getWidth() + gap, by, delW, BTN_H,
+        delText, self, BridgeAppearance.Window.onDelete)
+    self.deleteBtn:initialise()
+    self.deleteBtn:instantiate()
+    if self.deleteBtn.enableCancelColor ~= nil then self.deleteBtn:enableCancelColor() end
+    self.deleteBtn:setEnable(false)
+    self:addChild(self.deleteBtn)
 end
 
 function BridgeAppearance.Window:prerender()
@@ -766,6 +816,7 @@ function BridgeAppearance.Window:update()
         self.lastView = v
         self:applyTabZoom(v.tabKey)
     end
+    if self.lookCombo ~= nil then self:refreshLookButtons() end
 end
 
 function BridgeAppearance.Window:refresh()
@@ -789,6 +840,158 @@ function BridgeAppearance.Window:selectTab(which)
     pcall(function() self.panel:activateView(name) end)
 end
 
+function BridgeAppearance.Window:refreshLookButtons()
+    local combo = self.lookCombo
+    local name = nil
+    if combo ~= nil and type(combo.options) == "table" and type(combo.selected) == "number" then
+        name = combo.options[combo.selected]
+    end
+    local del = self.deleteBtn
+    if del ~= nil and del.setEnable ~= nil then
+        local ok = type(name) == "string" and BridgeLooks ~= nil and BridgeLooks.canDelete(name) == true
+        del:setEnable(ok)
+    end
+    local save = self.saveBtn
+    if save ~= nil and save.setEnable ~= nil then
+        save:setEnable(BridgeLooks ~= nil and BridgeLooks.locked ~= nil and BridgeLooks.locked() ~= true)
+    end
+end
+
+function BridgeAppearance.Window:refreshLooks()
+    local combo = self.lookCombo
+    if combo == nil or BridgeLooks == nil or type(combo.addOption) ~= "function" then return end
+    local keep = nil
+    if type(combo.options) == "table" and type(combo.selected) == "number" then
+        keep = combo.options[combo.selected]
+    end
+    self.fillingLooks = true
+    combo.options = {}
+    combo.selected = 0
+    local list = BridgeLooks.all()
+    if type(list) == "table" then
+        for i = 1, #list do
+            local look = list[i]
+            if type(look) == "table" and type(look.name) == "string" then combo:addOption(look.name) end
+        end
+    end
+    combo.selected = 0
+    if type(keep) == "string" and type(combo.options) == "table" then
+        for i = 1, #combo.options do
+            if combo.options[i] == keep then combo.selected = i break end
+        end
+    end
+    self.fillingLooks = false
+    self:refreshLookButtons()
+end
+
+function BridgeAppearance.Window:selectedLook()
+    local combo = self.lookCombo
+    if combo == nil or type(combo.options) ~= "table" or type(combo.selected) ~= "number" then return nil end
+    local name = combo.options[combo.selected]
+    if type(name) ~= "string" then return nil end
+    return name
+end
+
+function BridgeAppearance.Window:selectLook(name)
+    local combo = self.lookCombo
+    if combo == nil or type(combo.options) ~= "table" then return end
+    combo.selected = 0
+    if type(name) ~= "string" then return end
+    for i = 1, #combo.options do
+        if combo.options[i] == name then combo.selected = i return end
+    end
+end
+
+
+
+function BridgeAppearance.Window:syncLook()
+    if BridgeLooks == nil or self.lookCombo == nil then return end
+    self:selectLook(BridgeLooks.current(BridgeAppearance.candidate))
+    self:refreshLookButtons()
+end
+
+function BridgeAppearance.Window:onLook(combo)
+    if self.fillingLooks then return end
+    if combo == nil or type(combo.options) ~= "table" or BridgeLooks == nil then return end
+    local name = combo.options[combo.selected]
+    if type(name) ~= "string" or BridgeAppearance.candidate == nil then return end
+    local look = BridgeLooks.find(name)
+    if look == nil then return end
+    BridgeLooks.applyTo(look, BridgeAppearance.candidate)
+    BridgeAppearance.refreshPreview()
+    BridgeAppearance.refreshViews()
+    self:refreshLookButtons()
+end
+
+function BridgeAppearance.Window:saveValidate(text)
+    if BridgeLooks == nil then return false end
+    local name = BridgeLooks.cleanName(text)
+    return name ~= nil and not BridgeLooks.isBuiltin(name)
+end
+
+function BridgeAppearance.Window:onSave()
+    if BridgeLooks == nil or BridgeLooks.locked() then return end
+    if ISTextBox == nil then return end
+    local text = self:selectedLook() or ""
+    if BridgeLooks.isBuiltin(text) then text = "" end
+    local modal = ISTextBox:new(0, 0, 280, 180, tr("LookPrompt"), text, self, BridgeAppearance.Window.onSaveDone)
+    if type(modal.backgroundColor) == "table" then modal.backgroundColor.a = 0.9 end
+    modal:initialise()
+    modal:addToUIManager()
+    if modal.entry ~= nil and modal.entry.setMaxTextLength ~= nil then modal.entry:setMaxTextLength(BridgeLooks.NAME_MAX) end
+    if modal.setValidateFunction ~= nil then modal:setValidateFunction(self, BridgeAppearance.Window.saveValidate) end
+end
+
+function BridgeAppearance.Window:onSaveDone(button)
+    if button == nil or button.internal ~= "OK" or BridgeLooks == nil then return end
+    local text = nil
+    if button.parent ~= nil and button.parent.entry ~= nil and button.parent.entry.getText ~= nil then
+        text = button.parent.entry:getText()
+    end
+    local look = BridgeLooks.save(text, BridgeAppearance.candidate)
+    if look == nil then return end
+    self:refreshLooks()
+    self:selectLook(look.name)
+    self:refreshLookButtons()
+end
+
+function BridgeAppearance.Window:onDelete()
+    local combo = self.lookCombo
+    if combo == nil or type(combo.options) ~= "table" or BridgeLooks == nil or ISModalDialog == nil then return end
+    local name = combo.options[combo.selected]
+    if type(name) ~= "string" or not BridgeLooks.canDelete(name) then return end
+    self.deleteName = name
+    local prompt = "Delete \"" .. name .. "\"?"
+    if type(getText) == "function" then
+        local t = getText("UI_characreation_BuildDeletePrompt", name)
+        if type(t) == "string" and t ~= "" and t ~= "UI_characreation_BuildDeletePrompt" then prompt = t end
+    end
+    local sw, sh = 800, 600
+    if type(getCore) == "function" then
+        local core = getCore()
+        if core ~= nil and core.getScreenWidth ~= nil then sw = core:getScreenWidth() end
+        if core ~= nil and core.getScreenHeight ~= nil then sh = core:getScreenHeight() end
+    end
+    local width = textW(UIFont.Small, prompt) + 48
+    if width < 230 then width = 230 end
+    if width > 480 then width = 480 end
+    local modal = ISModalDialog:new((sw - width) / 2, (sh - 120) / 2, width, 120, prompt, true, self, BridgeAppearance.Window.onDeleteDone)
+    if type(modal.backgroundColor) == "table" then modal.backgroundColor.a = 0.9 end
+    modal:initialise()
+    modal:addToUIManager()
+    if modal.setCapture ~= nil then modal:setCapture(true) end
+    if modal.setAlwaysOnTop ~= nil then modal:setAlwaysOnTop(true) end
+end
+
+function BridgeAppearance.Window:onDeleteDone(button)
+    if button == nil or button.internal ~= "YES" or BridgeLooks == nil then return end
+    local name = self.deleteName
+    self.deleteName = nil
+    if type(name) ~= "string" or not BridgeLooks.delete(name) then return end
+    self:refreshLooks()
+    self:syncLook()
+end
+
 function BridgeAppearance.Window:onApply()
     local c = BridgeAppearance.candidate
     if c.skin ~= nil then pcall(function() Bridge.setSkin(c.skin) end) end
@@ -808,6 +1011,7 @@ function BridgeAppearance.Window:onApply()
     if BridgeData.makeupList() ~= nil then
         pcall(function() Bridge.setMakeup(c.makeup) end)
     end
+    if BridgeLooks ~= nil then BridgeLooks.remember(self:selectedLook()) end
 end
 
 function BridgeAppearance.Window:onClose()
@@ -861,6 +1065,8 @@ function BridgeAppearance.open(tab)
     w:setVisible(true)
     BridgeAppearance.instance = w
     w:refresh()
+    if w.refreshLooks ~= nil then w:refreshLooks() end
+    if w.syncLook ~= nil then w:syncLook() end
     BridgeAppearance.refreshPreview()
     w:selectTab(tab)
     log("opened")

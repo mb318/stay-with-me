@@ -11,33 +11,30 @@ BridgeCallout.FLANK_DIST = 8
 BridgeCallout.CRAWLER_DIST = 3
 BridgeCallout.BREACH_DIST = 5
 BridgeCallout.MELEE_DIST = 6
-BridgeCallout.PLAYER_KILL_DIST = 10
 BridgeCallout.COMBAT_GRACE = 4
 BridgeCallout.FINISH_HP = 0.5
 BridgeCallout.PLAYER_HIT_DROP = 1.0
-BridgeCallout.STRIKE_MEMORY = 10
 
-BridgeCallout.FLANK_SIGN = 1
+BridgeCallout.FLANK_SIGN = -1
 
 BridgeCallout.lastAny = -99999
 BridgeCallout.deferred = {}
 BridgeCallout.fightingAt = -99999
 BridgeCallout.wasFighting = false
 BridgeCallout.pendingKill = nil
-BridgeCallout.strikes = {}
 BridgeCallout.lastHealth = nil
 BridgeCallout.finisherTarget = nil
 BridgeCallout.info = "none"
 
-BridgeCallout.AMBIENT = { "EvChatter", "EvTaunt" }
+BridgeCallout.AMBIENT = { "EvTaunt" }
 
---Master toggle: 1 = callouts on, 0 = all callouts off
+
 BridgeCallout.ENABLED = 1
 
---Debug: 1 = log callouts made/blocked, 0 = silent
-BridgeCallout.DEBUG = 1
 
---Callout toggles: 1 = on, 0 = off
+BridgeCallout.DEBUG = 0
+
+
 BridgeCallout.SAY = {
     EvBehind     = 0,
     EvEngage     = 1,
@@ -46,7 +43,6 @@ BridgeCallout.SAY = {
     EvBreakOff   = 1,
     EvSpot       = 1,
     EvLull       = 1,
-    EvPlayerKill = 0,
     EvPlayerHit  = 1,
     EvFlankLeft  = 0,
     EvFlankRight = 0,
@@ -54,17 +50,15 @@ BridgeCallout.SAY = {
     EvCrawler    = 0,
     EvBreach     = 0,
     EvLostTarget = 1,
-    EvChatter    = 1,
-    EvEncourage  = 0,
     EvTaunt      = 1,
     EvAimClear   = 1,
     EvAimOnMe    = 1,
 }
 
---Global minimum seconds between any two callouts
+
 BridgeCallout.REPEAT_GAP = 8
 
---Callout cooldowns, in seconds
+
 BridgeCallout.EVENTS = {
     EvBehind     = { slot = "Behind",     cooldown = 45 },
     EvEngage     = { slot = "Engage",     cooldown = 25 },
@@ -73,7 +67,6 @@ BridgeCallout.EVENTS = {
     EvBreakOff   = { slot = "BreakOff",   cooldown = 30 },
     EvSpot       = { slot = "Spot",       cooldown = 120 },
     EvLull       = { slot = "Lull",       cooldown = 150 },
-    EvPlayerKill = { slot = "PlayerKill", cooldown = 20 },
     EvPlayerHit  = { slot = "PlayerHit",  cooldown = 30 },
     EvFlankLeft  = { slot = "Flank",      cooldown = 45 },
     EvFlankRight = { slot = "Flank",      cooldown = 45 },
@@ -81,8 +74,6 @@ BridgeCallout.EVENTS = {
     EvCrawler    = { slot = "Crawler",    cooldown = 60 },
     EvBreach     = { slot = "Breach",     cooldown = 90 },
     EvLostTarget = { slot = "LostTarget", cooldown = 60 },
-    EvChatter    = { slot = "Chatter",    cooldown = 100 },
-    EvEncourage  = { slot = "Encourage",  cooldown = 120 },
     EvTaunt      = { slot = "Taunt",      cooldown = 150 },
     EvAimClear   = { slot = "AimClear",   cooldown = 15 },
     EvAimOnMe    = { slot = "AimOnMe",    cooldown = 15 },
@@ -91,7 +82,7 @@ BridgeCallout.EVENTS = {
 local function log(text) if BridgeLog ~= nil and BridgeLog.on() then print("[BridgeCallout] " .. tostring(text)) end end
 
 local function dlog(text)
-    if BridgeCallout.DEBUG == 1 then print("[BridgeCallout] " .. tostring(text)) end
+    if BridgeCallout.DEBUG == 1 then log(text) end
 end
 
 local function isBodyZ(z)
@@ -174,7 +165,30 @@ function BridgeCallout.defer(event)
     return true
 end
 
+local function carQuiet()
+    local red = nil
+    pcall(function() red = BridgeData.owner() end)
+    if red ~= nil then
+        local v = nil
+        pcall(function() v = red:getVehicle() end)
+        if v ~= nil then return true end
+    end
+    local inside = false
+    pcall(function() inside = BridgeCar ~= nil and (BridgeCar.isInside() or (red ~= nil and BridgeCar.withRed(red))) end)
+    return inside == true
+end
+
+local function dropCarLines()
+    BridgeCallout.deferred = {}
+    BridgeCallout.pendingKill = nil
+    BridgeCallout.wasFighting = false
+    BridgeCallout.fightingAt = -99999
+    BridgeCallout.finisherTarget = nil
+    BridgeCallout.lastHealth = nil
+end
+
 local function say(event)
+    if carQuiet() then dropCarLines() return false end
     if BridgeCallout.ENABLED == 0 then return false end
     if trySay(event) then return true end
     if DEFER[event] then BridgeCallout.defer(event) end
@@ -298,6 +312,7 @@ end
 
 function BridgeCallout.kill(z)
     if BridgeCallout.ENABLED == 0 then return false end
+    if carQuiet() then dropCarLines() return false end
     if z == nil then return false end
     if deadZ(z) then return say("EvKill") end
     BridgeCallout.pendingKill = z
@@ -312,11 +327,9 @@ function BridgeCallout.lostTarget()
     return say("EvLostTarget")
 end
 
--- Highest-priority callout. It shares the global 8s gap with every other callout
--- (it must wait for it, and it stamps it for them), but it wins the slot over all
--- of them and pre-empts anything queued.
 function BridgeCallout.sayPriority(event)
     if BridgeCallout.ENABLED == 0 then return false end
+    if carQuiet() then return false end
     local e = BridgeCallout.EVENTS[event]
     if e == nil then return false end
     if BridgeCallout.SAY[event] == 0 then return false end
@@ -339,27 +352,9 @@ function BridgeCallout.sayPriority(event)
     return said
 end
 
--- She is in the player's gun line: onMe = nothing beyond her, so the muzzle is on
--- her; otherwise she is blocking a shot at something else.
 function BridgeCallout.aimClear(onMe)
     if onMe then return BridgeCallout.sayPriority("EvAimOnMe") end
     return BridgeCallout.sayPriority("EvAimClear")
-end
-
-function BridgeCallout.playerStrike(z)
-    if BridgeCallout.ENABLED == 0 then return false end
-    if BridgeCallout.SAY.EvPlayerKill == 0 and BridgeCallout.SAY.EvEncourage == 0 then return false end
-    if z == nil or z == Bridge.body then return false end
-    if isBodyZ(z) or remoteZ(z) or BridgeData.harmless(z) then return false end
-    local rec = { z = z, t = Bridge.time }
-    pcall(function()
-        local red = BridgeData.owner()
-        if red ~= nil then
-            rec.d = math.sqrt((z:getX() - red:getX()) ^ 2 + (z:getY() - red:getY()) ^ 2)
-        end
-    end)
-    BridgeCallout.strikes[#BridgeCallout.strikes + 1] = rec
-    return true
 end
 
 function BridgeCallout.behind()
@@ -381,6 +376,11 @@ end
 
 function BridgeCallout.update(body)
     if body == nil then return end
+    if carQuiet() then
+        dropCarLines()
+        BridgeCallout.info = "car"
+        return
+    end
     if BridgeCallout.ENABLED == 0 then return end
     if not Bridge.every(15) then return end
     if not Bridge.alive() then return end
@@ -404,24 +404,6 @@ function BridgeCallout.update(body)
         if deadZ(pk) then say("EvKill") end
     end
 
-    local strikes = BridgeCallout.strikes
-    if #strikes > 0 then
-        local keep = {}
-        for _, s in ipairs(strikes) do
-            if deadZ(s.z) then
-                if engaged and (s.d or 99) <= BridgeCallout.PLAYER_KILL_DIST then say("EvPlayerKill") end
-            elseif Bridge.time - s.t < BridgeCallout.STRIKE_MEMORY * BridgeCallout.SEC then
-                if BridgeCallout.SAY.EvEncourage ~= 0 and engaged
-                    and (s.d or 99) <= BridgeCallout.PLAYER_KILL_DIST and not s.praised then
-                    say("EvEncourage")
-                    s.praised = true
-                end
-                keep[#keep + 1] = s
-            end
-        end
-        BridgeCallout.strikes = keep
-    end
-
     local health = nil
     pcall(function() health = red:getBodyDamage():getOverallBodyHealth() end)
     if health ~= nil then
@@ -442,10 +424,13 @@ function BridgeCallout.update(body)
         if facts.horde >= BridgeCallout.HORDE_COUNT and say("EvHorde") then return end
         if facts.crawler and say("EvCrawler") then return end
         if BridgeCallout.SAY.EvFinisher ~= 0 and scanFinisher() and say("EvFinisher") then return end
-        if (BridgeCallout.SAY.EvChatter ~= 0 or BridgeCallout.SAY.EvTaunt ~= 0) and nearTarget(body) then
-            local start = 1 + ZombRand(#BridgeCallout.AMBIENT)
-            for i = 0, #BridgeCallout.AMBIENT - 1 do
-                if say(BridgeCallout.AMBIENT[1 + ((start - 1 + i) % #BridgeCallout.AMBIENT)]) then return end
+        if BridgeCallout.SAY.EvTaunt ~= 0 and nearTarget(body) then
+            local n = #BridgeCallout.AMBIENT
+            local start = ZombRand(n)
+            for i = 0, n - 1 do
+                local k = start + i
+                if k >= n then k = k - n end
+                if say(BridgeCallout.AMBIENT[k + 1]) then return end
             end
         end
         return

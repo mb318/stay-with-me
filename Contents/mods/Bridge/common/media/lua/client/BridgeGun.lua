@@ -65,14 +65,23 @@ function BridgeGun.shieldBlast(body, boom, sq, info)
     end)
     local ok, err = pcall(boom, sq, info)
     if removed then
-        pcall(function()
-            if list:indexOf(body) < 0 then list:add(body) end
-        end)
-        local back = false
-        pcall(function() back = list:indexOf(body) >= 0 end)
-        if not back then
+        local listed = false
+        pcall(function() listed = getCell():getZombieList():contains(body) end)
+        if listed then
+            pcall(function()
+                local live = body:getCurrentSquare()
+                local dest = (live ~= nil and live:getMovingObjects()) or list
+                if dest ~= nil and dest:indexOf(body) < 0 then dest:add(body) end
+            end)
+        else
+
+
+
             BridgeGun.metrics.blastRepair = BridgeGun.metrics.blastRepair + 1
-            pcall(function() body:addToWorld() end)
+            if Bridge ~= nil and Bridge.mp and Bridge.body == body then
+                Bridge.body = nil
+                Bridge.kind = nil
+            end
         end
     end
     if not ok then

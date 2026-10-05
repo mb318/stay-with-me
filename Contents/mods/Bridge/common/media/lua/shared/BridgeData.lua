@@ -263,7 +263,8 @@ BridgeData.KEEP_SIDES = { behind = true, left = true, right = true }
 
 
 
-BridgeData.KEEP_SIDES_ON = true
+BridgeData.KEEP_SIDES_ON = false
+
 
 
 
@@ -338,7 +339,6 @@ function BridgeData.hairOf(rec)
     local hair = rec ~= nil and BridgeData.cleanHair(rec.hair) or nil
     return hair or BridgeData.DEFAULT_HAIR
 end
-
 
 BridgeData.DEFAULT_SKIN = "FemaleBody01"
 BridgeData.SKINS = { "FemaleBody01", "FemaleBody02", "FemaleBody03", "FemaleBody04", "FemaleBody05" }
@@ -488,9 +488,44 @@ function BridgeData.makeupMeta(itemType)
 end
 
 
+local function asList(t)
+    if type(t) ~= "table" then return nil end
+    local out = {}
+    local n = #t
+    if n > 0 then
+        for i = 1, n do out[i] = t[i] end
+        return out
+    end
+    local i = 1
+    while true do
+        local v = t[i]
+        if v == nil then v = t[tostring(i)] end
+        if v == nil then break end
+        out[i] = v
+        i = i + 1
+    end
+    return out
+end
+
+
+local function tokenOk(name)
+    return type(name) == "string" and name ~= "" and #name <= 64 and string.find(name, "[^%w_]") == nil
+end
+
+
 function BridgeData.cleanMakeup(list)
-    if type(list) ~= "table" then return nil end
+    list = asList(list)
+    if list == nil then return nil end
     local out, seen = {}, {}
+    if BridgeData.makeupList() == nil then
+        for _, itemType in ipairs(list) do
+            if type(itemType) == "string" and string.find(itemType, "^[%w_]+%.[%w_]+$") ~= nil and not seen[itemType] then
+                seen[itemType] = true
+                out[#out + 1] = itemType
+            end
+        end
+        return out
+    end
     for _, itemType in ipairs(list) do
         local m = BridgeData.makeupMeta(itemType)
         if m ~= nil and not seen[m.category] then
@@ -531,7 +566,7 @@ end
 
 function BridgeData.detailEntries(rec)
     local out = {}
-    local wanted = (rec ~= nil and type(rec.details) == "table") and rec.details or {}
+    local wanted = asList(rec ~= nil and rec.details or nil) or {}
     for _, e in ipairs(BridgeData.spnccDetails() or {}) do
         for _, n in ipairs(wanted) do
             if n == e.name then out[#out + 1] = e break end
@@ -542,8 +577,14 @@ end
 
 
 function BridgeData.cleanFace(name)
+    if name == nil or name == "" then return nil end
     if type(name) ~= "string" then return nil end
-    for _, e in ipairs(BridgeData.spnccFaces() or {}) do
+    local faces = BridgeData.spnccFaces()
+    if faces == nil then
+        if tokenOk(name) then return name end
+        return nil
+    end
+    for _, e in ipairs(faces) do
         if e.name == name then return name end
     end
     return nil
@@ -551,9 +592,21 @@ end
 
 
 function BridgeData.cleanDetails(list)
-    if type(list) ~= "table" then return nil end
-    local ok, seen, out = {}, {}, {}
-    for _, e in ipairs(BridgeData.spnccDetails() or {}) do ok[e.name] = true end
+    list = asList(list)
+    if list == nil then return nil end
+    local catalog = BridgeData.spnccDetails()
+    local seen, out = {}, {}
+    if catalog == nil then
+        for _, n in ipairs(list) do
+            if tokenOk(n) and not seen[n] then
+                seen[n] = true
+                out[#out + 1] = n
+            end
+        end
+        return out
+    end
+    local ok = {}
+    for _, e in ipairs(catalog) do ok[e.name] = true end
     for _, n in ipairs(list) do
         if type(n) == "string" and ok[n] and not seen[n] then
             seen[n] = true
@@ -570,6 +623,8 @@ function BridgeData.muscleOf(rec)
     if n > BridgeData.MUSCLE_MAX then n = BridgeData.MUSCLE_MAX end
     return math.floor(n)
 end
+
+
 
 
 function BridgeData.wants(rec)

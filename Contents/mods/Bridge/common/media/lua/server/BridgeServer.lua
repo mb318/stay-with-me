@@ -129,6 +129,8 @@ local function issuedStore()
     return s
 end
 
+BridgeServer.lookAt = BridgeServer.lookAt or {}
+local LOOK_RECLAIM_MS = 60000
 local function issuedMap()
     if BridgeServer.issued ~= nil then return BridgeServer.issued end
     local map = {}
@@ -159,33 +161,38 @@ local function issue(id, who)
 end
 
 
+
 function BridgeServer.isCompanionBody(z)
     if z == nil then return false end
     local ours = false
     pcall(function()
         local md = z:getModData()
-        if md ~= nil then ours = md.notAloneBody == true or md.ST_Ignore == true end
+        ours = md ~= nil and md.notAloneBody == true
     end)
     if ours then return true end
-    pcall(function() ours = z:getVariableBoolean("SurvivorNPC") == true end)
+    pcall(function() ours = z:getVariableBoolean("NotAloneBody") == true end)
     if ours then return true end
     local pid = nil
     pcall(function() pid = z:getPersistentOutfitID() end)
-    if pid ~= nil and BridgeServer.hasMark(pid) then
-        local known = false
-        pcall(function() known = issuedMap()[pid] ~= nil end)
-        if known then ours = true end
-    end
+    if pid == nil or not BridgeServer.hasMark(pid) then return false end
+    pcall(function()
+        for _, rec in pairs(world().players) do
+            if rec.bodyId == pid then ours = true return end
+        end
+    end)
     return ours
 end
-
 
 function BridgeServer.isCompanionId(pid)
     if type(pid) ~= "number" or pid == 0 then return false end
     if not BridgeServer.hasMark(pid) then return false end
-    local known = false
-    pcall(function() known = issuedMap()[pid] ~= nil end)
-    return known
+    local ours = false
+    pcall(function()
+        for _, rec in pairs(world().players) do
+            if rec.bodyId == pid then ours = true return end
+        end
+    end)
+    return ours
 end
 
 
@@ -215,6 +222,21 @@ end
 
 
 
+local TRIP_IGNORE = 1000000000
+local trippingOn = nil
+
+local function tripModOn()
+    if trippingOn == nil then
+        trippingOn = false
+        pcall(function()
+            local mods = getActivatedMods()
+            trippingOn = mods:contains("TrippingZombies") or mods:contains("\\TrippingZombies")
+        end)
+        if trippingOn then log("Tripping Zombies detected: companion trip suppression on") end
+    end
+    return trippingOn
+end
+
 local function markHuman(body)
     pcall(function() body:setVariable("SurvivorNPC", true) end)
     pcall(function() body:setVariable("NotAloneBody", true) end)
@@ -222,7 +244,9 @@ local function markHuman(body)
 
 
     pcall(function() body:getModData().ST_Ignore = true end)
+
     pcall(function() body:getModData().RandomZedsExcluded = true end)
+    pcall(function() body:getModData().tzCooldown = TRIP_IGNORE end)
 end
 
 local function unmarkHuman(body)
@@ -231,6 +255,7 @@ local function unmarkHuman(body)
     pcall(function() body:getModData().notAloneBody = nil end)
     pcall(function() body:getModData().ST_Ignore = nil end)
     pcall(function() body:getModData().RandomZedsExcluded = nil end)
+    pcall(function() body:getModData().tzCooldown = nil end)
 end
 
 
@@ -276,17 +301,24 @@ local function currentBody(who, rec)
         pcall(function() ok = b:getPersistentOutfitID() == rec.bodyId and not b:isDead() and b:isExistInTheWorld() end)
     end
     if not ok then
-
         if b ~= nil then
-            local alive, inWorld, ours = false, false, false
+            local alive, inWorld, ours, pidNow = false, false, false, nil
             pcall(function()
                 alive = not b:isDead()
                 inWorld = b:isExistInTheWorld()
+                pidNow = b:getPersistentOutfitID()
             end)
             pcall(function() ours = BridgeServer.isCompanionBody(b) end)
-            if alive and inWorld and ours and b:getPersistentOutfitID() ~= rec.bodyId then
+
+
+            local looked = false
+            pcall(function()
+                local t = BridgeServer.lookAt[who]
+                looked = t ~= nil and getTimestampMs() - t <= LOOK_RECLAIM_MS
+            end)
+            if alive and inWorld and ours and looked and pidNow ~= nil and pidNow ~= rec.bodyId then
                 local pid = nil
-                pcall(function() pid = BridgeServer.markId(b:getPersistentOutfitID()) end)
+                pcall(function() pid = BridgeServer.markId(pidNow) end)
                 if pid ~= nil and not outfitIdTaken(b, pid) then
                     pcall(function() b:setPersistentOutfitID(pid, b:isPersistentOutfitInit()) end)
                     companionFlags(b)
@@ -302,6 +334,7 @@ local function currentBody(who, rec)
                 end
             end
         end
+
 
         local deadHere = false
         pcall(function() deadHere = b ~= nil and b:isDead() end)
@@ -321,6 +354,9 @@ end
 local function forget(who, rec, why)
     local b = BridgeServer.bodies[who]
     if stillBody(b, rec.bodyId) then releaseBody(b) end
+    if b ~= nil and not stillBody(b, rec.bodyId) then
+        pcall(function() if b:hasModData() then b:getModData().RandomZedsExcluded = nil end end)
+    end
 
     if b ~= nil then BridgeServer.touched[b] = nil end
     rec.bodyId = nil
@@ -411,6 +447,7 @@ local function createBody(x, y, z)
 
 
 
+        unmarkHuman(candidate)
         if not BridgeData.foreign(candidate) then
             pcall(function() candidate:removeFromSquare() end)
             pcall(function() candidate:removeFromWorld() end)
@@ -950,6 +987,11 @@ BridgeServer.Commands.state = function(player, args)
             changed = true
         end
     end
+
+    if args.hair ~= nil or args.skin ~= nil or args.hairColor ~= nil or args.face ~= nil or args.details ~= nil
+        or args.muscle ~= nil or args.makeup ~= nil then
+        pcall(function() BridgeServer.lookAt[player:getUsername()] = getTimestampMs() end)
+    end
     if args.hair ~= nil then
         local hair = BridgeData.cleanHair(args.hair)
         if hair ~= nil and rec.hair ~= hair then
@@ -968,7 +1010,11 @@ BridgeServer.Commands.state = function(player, args)
         local color = BridgeData.cleanHairColor(args.hairColor)
         if color ~= nil then
             local old = rec.hairColor
-            if type(old) ~= "table" or old.r ~= color.r or old.g ~= color.g or old.b ~= color.b then
+            local same = type(old) == "table"
+                and math.abs((old.r or 0) - color.r) < 0.01
+                and math.abs((old.g or 0) - color.g) < 0.01
+                and math.abs((old.b or 0) - color.b) < 0.01
+            if not same then
                 rec.hairColor = color
                 changed = true
             end
@@ -1023,6 +1069,7 @@ BridgeServer.Commands.state = function(player, args)
             end
         end
     end
+
 
     if args.keep ~= nil and BridgeData.keepAllowed(args.keep) and rec.keep ~= args.keep then
         rec.keep = args.keep
@@ -2062,11 +2109,10 @@ local function onTick()
         end
     end
 
-    if BridgeServer.newSecond and sec % 10 == 0 then
+    if BridgeServer.newSecond and sec % 10 == 0 and tripModOn() then
         for _, b in pairs(BridgeServer.bodies) do
-            pcall(function() b:getModData().RandomZedsExcluded = true end)
+            pcall(function() b:getModData().tzCooldown = TRIP_IGNORE end)
         end
-        if BridgeCompat ~= nil then pcall(BridgeCompat.install) end
     end
 
 
@@ -2078,6 +2124,12 @@ local function onTick()
         end
         BridgeServer.onlineCount = count
         refreshOnline()
+    end
+    if BridgeServer.newSecond and sec % 10 == 0 then
+        for _, b in pairs(BridgeServer.bodies) do
+            pcall(function() b:getModData().RandomZedsExcluded = true end)
+        end
+        if BridgeCompat ~= nil then pcall(BridgeCompat.install) end
     end
 
     if BridgeServer.newSecond and sec % 10 == 0 then

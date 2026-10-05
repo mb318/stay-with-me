@@ -1,0 +1,10 @@
+[ ALERT_CONFIG ]
+link1 = Workshop = https://steamcommunity.com/sharedfiles/filedetails/?id=3800989007,
+[ ------ ]
+
+[ v0.3.9.5 ]
+v0.3.9.5
+
+Added:
+- ...
+[ ------ ]

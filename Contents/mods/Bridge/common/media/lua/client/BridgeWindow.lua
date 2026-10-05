@@ -78,40 +78,12 @@ function BridgeWindow.lookKey(st)
     local hc = BridgeData.hairColorOf(st)
     return BridgeData.skinOf(st) .. "|" .. BridgeData.hairOf(st) .. "|"
         .. tostring(hc.r) .. "," .. tostring(hc.g) .. "," .. tostring(hc.b) .. "|"
-        .. tostring(st ~= nil and st.face or "") .. "|" .. table.concat((st ~= nil and st.details) or {}, ",") .. "|"
+        .. tostring(st ~= nil and st.face or "") .. "|" .. table.concat(BridgeData.cleanDetails(st ~= nil and st.details or nil) or {}, ",") .. "|"
         .. tostring(BridgeData.muscleOf(st)) .. "|" .. table.concat(BridgeData.makeupOf(st), ",") .. "|"
         .. BridgeItems.lookKey(BridgeItems.decode(items))
 end
 
 
-
-function BridgeWindow.relPercent(r)
-    local f = (r ~= nil and r.f) or 0
-    local pct = (f + 100) / 2
-    if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
-    return pct
-end
-
-function BridgeWindow.relColor(pct)
-    if pct < 50 then
-        local t = pct / 50
-        return 0.85, 0.20 + 0.65 * t, 0.15
-    end
-    local t = (pct - 50) / 50
-    return 0.85 - 0.65 * t, 0.85, 0.15
-end
-
-function BridgeWindow.relText(r)
-    local label = ""
-    if BridgeSocial ~= nil and BridgeSocial.label ~= nil then
-        pcall(function() label = BridgeSocial.label() end)
-    end
-    if label == nil or label == "" then
-        pcall(function() label = getText("IGUI_NotAlone_Rel_" .. BridgeData.relTier(r)) end)
-    end
-    local pct = math.floor(BridgeWindow.relPercent(r) + 0.5)
-    return tostring(label) .. "  " .. pct .. "%"
-end
 
 function BridgeWindow.makeDesc(st)
     local desc = SurvivorFactory.CreateSurvivor()
@@ -203,7 +175,9 @@ function BridgeWindowInfo:createChildren()
     self.callBtn.borderColor = { r = 1, g = 1, b = 1, a = 0.1 }
     self:addChild(self.callBtn)
 
-    self.appearBtn = ISButton:new(x, 0, w, BTN_H, tr("WindowAppearance"), self, BridgeWindowInfo.onAppearance)
+    local change = getText("IGUI_PlayerStats_Change")
+    local bw = getTextManager():MeasureStringX(UIFont.Small, change) + PAD * 2
+    self.appearBtn = ISButton:new(self.width - PAD - bw, 0, bw, BTN_H, change, self, BridgeWindowInfo.onAppearance)
     self.appearBtn:initialise()
     self.appearBtn:instantiate()
     self.appearBtn.borderColor = { r = 1, g = 1, b = 1, a = 0.1 }
@@ -235,6 +209,40 @@ function BridgeWindow.hairLabel(style)
     return text or tostring(style)
 end
 
+
+
+
+BridgeWindow.REL_TICKS = { 20, 45, 75 }
+BridgeWindow.REL_BAR_H = 8
+BridgeWindow.REL_COLORS = {
+    Cold = { 0.38, 0.42, 0.50 },
+    Known = { 0.50, 0.58, 0.68 },
+    Pal = { 0.42, 0.62, 0.80 },
+    Friend = { 0.62, 0.52, 0.82 },
+    Close = { 0.86, 0.46, 0.64 },
+}
+
+function BridgeWindow.relBar(rel)
+    local f = rel ~= nil and tonumber(rel.f) or 0
+    if f == nil or f ~= f then f = 0 end
+    local fill = f / 100
+    if fill < 0 then fill = 0 elseif fill > 1 then fill = 1 end
+    local c = BridgeWindow.REL_COLORS[BridgeData.relTier(rel)] or BridgeWindow.REL_COLORS.Known
+    return fill, c[1], c[2], c[3]
+end
+
+function BridgeWindowInfo:drawRelBar(x, y, w)
+    local fill, cr, cg, cb = BridgeWindow.relBar(BridgeData.relOf(Bridge.store))
+    local h = BridgeWindow.REL_BAR_H
+    self:drawRect(x, y, w, h, 1, 0.12, 0.12, 0.12)
+    local fillW = math.floor(w * fill)
+    if fillW > 0 then self:drawRect(x, y, fillW, h, 1, cr, cg, cb) end
+    for _, t in ipairs(BridgeWindow.REL_TICKS) do
+        self:drawRect(x + math.floor(w * t / 100), y, 1, h, 1, 0.05, 0.05, 0.05)
+    end
+    self:drawRectBorder(x, y, w, h, 1, 0.35, 0.35, 0.35)
+end
+
 function BridgeWindowInfo:render()
     if Bridge == nil or Bridge.store == nil then return end
     local x, y = self.textX, PAD
@@ -243,22 +251,10 @@ function BridgeWindowInfo:render()
     y = y + FONT_M + 2
     self:drawRect(x, y, colW, 1, 1, 0.4, 0.4, 0.4)
     y = y + PAD
-    self:drawText(fitText(UIFont.Small, BridgeMenu.status(), colW), x, y, 0.75, 0.75, 0.75, 1, UIFont.Small)
-    y = y + FONT_S + PAD
-
-    local r = BridgeData.relOf(Bridge.store)
-    local pct = BridgeWindow.relPercent(r)
-    local barH = 12
-    local barW = colW
-    self:drawRect(x, y, barW, barH, 1, 0.12, 0.12, 0.12)
-    local fillW = math.floor(barW * pct / 100)
-    if fillW > 0 then
-        local cr, cg, cb = BridgeWindow.relColor(pct)
-        self:drawRect(x, y, fillW, barH, 1, cr, cg, cb)
-    end
-    self:drawRectBorder(x, y, barW, barH, 1, 0.6, 0.6, 0.6)
-    self:drawText(fitText(UIFont.Small, BridgeWindow.relText(r), colW), x, y + barH + 2, 1, 1, 1, 1, UIFont.Small)
-    y = y + barH + 2 + FONT_S + PAD
+    self:drawText(fitText(UIFont.Small, BridgeMenu.status(true), colW), x, y, 0.75, 0.75, 0.75, 1, UIFont.Small)
+    y = y + FONT_S + 4
+    self:drawRelBar(x, y, colW)
+    y = y + BridgeWindow.REL_BAR_H + PAD
 
     local present = BridgeMenu.isPresent()
 
@@ -269,16 +265,27 @@ function BridgeWindowInfo:render()
     self.callBtn:setY(y)
     y = y + BTN_H + PAD * 2
 
-    self.appearBtn:setY(y)
+    self:drawText(tr("WindowAppearance"), x, y, 1, 1, 1, 1, UIFont.Small)
+    local shown = tr("LookDefault")
+    if BridgeLooks ~= nil and type(BridgeLooks.shown) == "function" then
+        local n = BridgeLooks.shown(Bridge.store)
+        if type(n) == "string" and n ~= "" then shown = n end
+    end
+    local lookX = x + textW(UIFont.Small, tr("WindowAppearance")) + PAD
+    local appear = self.appearBtn
+    local room = colW - (lookX - x)
+    if type(appear) == "table" or type(appear) == "userdata" then
+        if appear.getX ~= nil then room = appear:getX() - PAD - lookX end
+        appear:setY(y - (BTN_H - FONT_S) / 2)
+    end
+    self:drawText(fitText(UIFont.Small, shown, room), lookX, y, 0.6, 0.6, 0.6, 1, UIFont.Small)
+
+
 end
 
 function BridgeWindowInfo:onCall()
     if BridgeCar ~= nil and BridgeCar.inCarForMenu() then return end
     if BridgeMenu.isPresent() then BridgeMenu.onGoodbye() else BridgeMenu.onCall() end
-end
-
-function BridgeWindowInfo:onAppearance()
-    if BridgeAppearance ~= nil then BridgeAppearance.open("body") end
 end
 
 
@@ -304,6 +311,10 @@ function BridgeWindow.hairStyles()
     end
     table.sort(out, function(a, b) return a.label < b.label end)
     return out
+end
+
+function BridgeWindowInfo:onAppearance()
+    if BridgeAppearance ~= nil then BridgeAppearance.open("body") end
 end
 
 function BridgeWindowInfo:new(x, y, width, height)
@@ -408,7 +419,7 @@ end
 
 function BridgeWindowMain:prerender()
 
-    if Bridge ~= nil and Bridge.store ~= nil then self.title = name() end
+    self.title = ""
     ISCollapsableWindow.prerender(self)
 end
 
@@ -436,15 +447,16 @@ BridgeWindow.HEIGHT = 340
 function BridgeWindow.neededSize()
     refreshFonts()
     local textX = PAD + 1 + AVATAR_BORDER + AVATAR_W + AVATAR_BORDER + PAD
-
     local status = ""
-    pcall(function() status = BridgeMenu.status() end)
+    pcall(function() status = BridgeMenu.status(true) end)
+
+    local lookLabel = tr("LookDefault")
     local colW = math.max(
         textW(UIFont.Medium, name()),
         textW(UIFont.Small, status),
         textW(UIFont.Small, tr("Goodbye")) + PAD * 2,
         textW(UIFont.Small, tr("Call", name())) + PAD * 2,
-        textW(UIFont.Small, tr("WindowAppearance")) + PAD * 2)
+        textW(UIFont.Small, tr("WindowAppearance")) + PAD + textW(UIFont.Small, lookLabel) + PAD + textW(UIFont.Small, getText("IGUI_PlayerStats_Change")) + PAD * 2)
     local w = textX + colW + PAD
 
     local gap = UI_BORDER_SPACING or 10
@@ -454,7 +466,7 @@ function BridgeWindow.neededSize()
     w = math.max(w, PAD * 2 + textW(UIFont.Small, tr("WindowName") .. " " .. name()))
     local tickH = math.max(BTN_H, FONT_S) + gap
     local infoH = math.max(PAD * 2 + 2 + AVATAR_H + AVATAR_BORDER * 2,
-        PAD + FONT_M + 2 + PAD + FONT_S + PAD + BTN_H + PAD * 2 + BTN_H + PAD)
+        PAD + FONT_M + 2 + PAD + FONT_S + 4 + BridgeWindow.REL_BAR_H + PAD + BTN_H + PAD * 2 + BTN_H + PAD)
     local setH = PAD + #BridgeWindow.TICKS * (tickH + PAD) + PAD + FONT_S + PAD / 2 + BTN_H + PAD
     return math.max(BridgeWindow.WIDTH, math.ceil(w)), math.ceil(math.max(infoH, setH))
 end

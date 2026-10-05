@@ -1,16 +1,9 @@
 /*
 sounds_staywithme.txt - Stay With Me
 
-Critical-hit head foley for the companion. These reuse the vanilla FMOD events
-(Zombie/HeadSmash, Zombie/HeadStab, Zombie/HeadSlice) so the crunch is the same
-sound as the base game.
-
-distanceMax is set to the vanilla range (~20, matching the old PZ_HeadSmash
-maxrange in SoundBanks.lua) so it carries exactly as it does for the player. The
-loudness boost is applied at runtime by BridgeFight (emitter:setVolume on the
-played instance), not here, so the radius stays vanilla.
-
-Played by BridgeFight.critSound -> victim:getEmitter():playSound(name).
+Head-hit sounds for the companion's critical hits. Vanilla FMOD events
+(Zombie/HeadSmash, Zombie/HeadStab, Zombie/HeadSlice) with the vanilla range.
+Played by headSound in BridgeFight.lua.
 */
 module Base
 {
