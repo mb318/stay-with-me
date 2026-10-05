@@ -278,6 +278,7 @@ local function swingFrames(item)
     len = math.floor(len * (1 + TIRED_SWING * BridgeFight.fatigue) + 0.5)
     return len, math.floor(len * 0.45 + 0.5)
 end
+BridgeFight.swingFrames = swingFrames
 
 
 
@@ -699,6 +700,11 @@ local function pickTarget(body, red, mode)
             local near = dSelf < mode.engageSelf or (not BridgeFight.guardOnly and dRed < mode.engageRed)
             if near then
                 local score = BridgeFight.threat(z, body, red, mode)
+                -- Prefer zombies outside the player's gun line; an in-cone one is only
+                -- taken when nothing better exists (and only if she can reach it).
+                if BridgeAim ~= nil and BridgeAim.zone.on and BridgeAim.inCone(z:getX(), z:getY(), z:getZ()) then
+                    score = score + (BridgeAim.TARGET_PENALTY or 30)
+                end
                 -- Only run the (possibly costly) reachability test for a candidate that
                 -- would actually become the new best, and only when the guard is on.
                 if score < bestD and (NO_CLIMB_ON == 0 or BridgeFight.reachable(body, z)) then
@@ -753,6 +759,16 @@ local function validTarget(z, body, red, mode)
     else
         local d = mode.rank == "self" and dist(z, body) or dist(z, red)
         if d > mode.targetMax then return false end
+    end
+    -- A zombie inside the player's gun line is only valid if she can hit it from
+    -- where she stands (attack from the edge); never chase one into the line.
+    if BridgeAim ~= nil and BridgeAim.zone.on and BridgeAim.inCone(z:getX(), z:getY(), z:getZ()) then
+        local reach = 0
+        pcall(function() reach = weapon(body):getMaxRange() end)
+        if dist(z, body) > reach + 0.1 then
+            BridgeFight.info = "target in the aim line, out of reach"
+            return false
+        end
     end
     return true
 end
@@ -902,6 +918,10 @@ function BridgeFight.update(body)
     if not BridgeFight.enabled then rest(false) return false end
     local red = BridgeData.owner()
     if red == nil then return false end
+
+    -- Aiming a gun through her outranks fighting: get behind him first.
+    if BridgeAim ~= nil and BridgeAim.step(body, red) then return true end
+
     local mode = BridgeFight.mode()
     watchCrawlers(body, red)
 
@@ -980,8 +1000,6 @@ function BridgeFight.update(body)
         end
         return true
     end
-
-
 
     if BridgeFight.target ~= nil and (Bridge.time - BridgeFight.lastPick) >= PICK_EVERY
         and validTarget(BridgeFight.target, body, red, mode) then

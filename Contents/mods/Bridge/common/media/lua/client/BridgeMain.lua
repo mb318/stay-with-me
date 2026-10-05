@@ -1745,6 +1745,7 @@ end
 function Bridge.setMode(mode)
     if mode == "waitcar" then mode = "wait" end
     if not BridgeData.MODES[mode] then return "unknown mode " .. tostring(mode) end
+    if BridgeTask ~= nil and BridgeTask.active then BridgeTask.cancel("mode") end
 
     Bridge.newLifePending = nil
     Bridge.mode = mode
@@ -3006,7 +3007,7 @@ local function updateZombieBody(body)
     local ownerDead = Bridge.mourning ~= nil or Bridge.redDead(BridgeData.owner())
     if not ownerDead then
         handProbe(body, "before weapon")
-        pcall(function() BridgeWeapon.update(body) end)
+        if BridgeTask == nil or not BridgeTask.active then pcall(function() BridgeWeapon.update(body) end) end
         handProbe(body, "weapon")
 
         local okSoc, errSoc = pcall(function() BridgeSocial.update(body) end)
@@ -3190,6 +3191,15 @@ local function updateZombieBody(body)
         return
     end
 
+    if not ownerDead and BridgeTask ~= nil and BridgeTask.active then
+        local okTask, taskBusy = pcall(function() return BridgeTask.update(body) end)
+        if not okTask then BridgeTask.info = "error: " .. tostring(taskBusy) end
+        if okTask and taskBusy then
+            Bridge.pose = nil
+            return
+        end
+    end
+
     handProbe(body, "before fight")
     local okFight, fighting = pcall(function() return BridgeFight.update(body) end)
     handProbe(body, "fight")
@@ -3216,7 +3226,8 @@ local function updateZombieBody(body)
 
 
     if Bridge.mode ~= "follow" and Bridge.target == nil and Bridge.zombieTicks % 60 == 0
-        and Bridge.time >= (Bridge.waitRetryAt or 0) then
+        and Bridge.time >= (Bridge.waitRetryAt or 0)
+        and not (BridgeAim ~= nil and BridgeAim.zone.on) then
         local st = Bridge.store
         if st ~= nil and st.waitX ~= nil and math.abs(body:getZ() - (st.waitZ or 0)) < 0.5 then
             local dx, dy = body:getX() - st.waitX, body:getY() - st.waitY
@@ -3949,7 +3960,7 @@ end
 
 local SAFE_COMMANDS = { say = true, voice = true, quiet = true, come = true, follow = true, go = true, wait = true,
     rest = true, stop = true, mode = true, sit = true, stand = true, sleep = true, anim = true, walk = true,
-    keep = true, far = true, combat = true, ["goto"] = true, trace = true, sq = true, doors = true, status = true,
+    keep = true, far = true, combat = true, ["goto"] = true, chop = true, trace = true, sq = true, doors = true, status = true,
     items = true, wounds = true, heal = true, wash = true, name = true, call = true, goodbye = true, menu = true,
     lose = true, despawn = true }
 
@@ -4146,6 +4157,32 @@ function Bridge.run(line)
         BridgeMove.forcedWalk = parts[3]
         BridgeMove.walkType = parts[3]
         return "walkType=" .. BridgeMove.walkType
+    end
+    if cmd == "chop" then
+        if BridgeTask == nil then return "no task module" end
+        if not Bridge.alive() then return "no body" end
+        local red = BridgeData.owner()
+        if red == nil then return "no player" end
+        local sq = nil
+        pcall(function()
+            local rx, ry, rz = math.floor(red:getX()), math.floor(red:getY()), math.floor(red:getZ())
+            local best, bestD = nil, 100000
+            for dx = -12, 12 do
+                for dy = -12, 12 do
+                    local s = getCell():getGridSquare(rx + dx, ry + dy, rz)
+                    if s ~= nil then
+                        local t = s:getTree()
+                        if t ~= nil and t:getObjectIndex() >= 0 then
+                            local d = dx * dx + dy * dy
+                            if d < bestD then best, bestD = s, d end
+                        end
+                    end
+                end
+            end
+            sq = best
+        end)
+        if sq == nil then return "no tree within 12" end
+        return BridgeTask.start("chopTree", { { x = sq:getX(), y = sq:getY(), z = sq:getZ() } })
     end
     if cmd == "say" then return Bridge.say(decode(tail(line, 2))) end
     if cmd == "voice" then return Bridge.voice(parts[3] or "ShoutHey") end
@@ -4943,6 +4980,8 @@ function Bridge.writeState()
             add("obstacle", BridgeMove.obstacle)
             pcall(function() add("doors", BridgeMove.doorInfo()) end)
             add("fight", tostring(BridgeFight.enabled) .. " " .. BridgeFight.state .. " " .. BridgeFight.info)
+            add("task", tostring(BridgeTask ~= nil and BridgeTask.active) .. " " .. tostring(BridgeTask ~= nil and BridgeTask.kind)
+                .. " " .. tostring(BridgeTask ~= nil and BridgeTask.phase) .. " " .. tostring(BridgeTask ~= nil and BridgeTask.info or "none"))
             add("fight_target", BridgeFight.targetInfo)
             add("fight_fatigue", string.format("%.2f miss=%.0f crowd=%d", BridgeFight.fatigue or 0, BridgeFight.lastMiss or 0, BridgeFight.crowd or 0))
             pcall(function() add("fight_near", BridgeFight.nearestInfo(Bridge.body)) end)

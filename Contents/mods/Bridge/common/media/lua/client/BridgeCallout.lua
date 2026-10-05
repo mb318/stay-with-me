@@ -57,6 +57,8 @@ BridgeCallout.SAY = {
     EvChatter    = 1,
     EvEncourage  = 0,
     EvTaunt      = 1,
+    EvAimClear   = 1,
+    EvAimOnMe    = 1,
 }
 
 --Global minimum seconds between any two callouts
@@ -82,6 +84,8 @@ BridgeCallout.EVENTS = {
     EvChatter    = { slot = "Chatter",    cooldown = 100 },
     EvEncourage  = { slot = "Encourage",  cooldown = 120 },
     EvTaunt      = { slot = "Taunt",      cooldown = 150 },
+    EvAimClear   = { slot = "AimClear",   cooldown = 15 },
+    EvAimOnMe    = { slot = "AimOnMe",    cooldown = 15 },
 }
 
 local function log(text) if BridgeLog ~= nil and BridgeLog.on() then print("[BridgeCallout] " .. tostring(text)) end end
@@ -306,6 +310,40 @@ end
 
 function BridgeCallout.lostTarget()
     return say("EvLostTarget")
+end
+
+-- Highest-priority callout. It shares the global 8s gap with every other callout
+-- (it must wait for it, and it stamps it for them), but it wins the slot over all
+-- of them and pre-empts anything queued.
+function BridgeCallout.sayPriority(event)
+    if BridgeCallout.ENABLED == 0 then return false end
+    local e = BridgeCallout.EVENTS[event]
+    if e == nil then return false end
+    if BridgeCallout.SAY[event] == 0 then return false end
+    local gap = BridgeCallout.REPEAT_GAP * BridgeCallout.SEC
+    if Bridge.time - BridgeCallout.lastAny < gap then
+        BridgeCallout.info = "blocked " .. event
+        return false
+    end
+    local said = false
+    pcall(function() said = BridgeMoments.say(event, e.cooldown * BridgeCallout.SEC, true, e.slot) == true end)
+    if said then
+        BridgeCallout.lastAny = Bridge.time
+        BridgeCallout.deferred = {}
+        BridgeCallout.info = event
+        log(event)
+        dlog("said priority " .. event .. " (slot " .. tostring(e.slot) .. ")")
+    else
+        BridgeCallout.info = "blocked " .. event
+    end
+    return said
+end
+
+-- She is in the player's gun line: onMe = nothing beyond her, so the muzzle is on
+-- her; otherwise she is blocking a shot at something else.
+function BridgeCallout.aimClear(onMe)
+    if onMe then return BridgeCallout.sayPriority("EvAimOnMe") end
+    return BridgeCallout.sayPriority("EvAimClear")
 end
 
 function BridgeCallout.playerStrike(z)

@@ -5328,6 +5328,12 @@ function BridgeMove.update(body)
         return
     end
 
+    -- Player is aiming a gun through her: get behind him before the follow logic.
+    if BridgeAim ~= nil and BridgeAim.step(body, BridgeData.owner()) then
+        trackStep(body)
+        return
+    end
+
     if BridgeMove.steering or BridgeMove.pathing then
         pcall(function() BridgeMove.openAhead(body) end)
         if BridgeMove.doorAct ~= nil then
