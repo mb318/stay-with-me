@@ -1454,7 +1454,47 @@ function BridgeInventory.wrapProximity()
     log("Proximity Inventory wrapped: her containers stay out of it")
 end
 
-Events.OnGameStart.Add(function() pcall(BridgeInventory.wrapProximity) end)
+local function betterContainersActive()
+    local on = false
+    pcall(function()
+        local mods = getActivatedMods()
+        on = mods ~= nil and (mods:contains("EURY_CONTAINERS") or mods:contains("\\EURY_CONTAINERS"))
+    end)
+    return on
+end
+
+
+function BridgeInventory.wrapBetterContainers()
+    if not betterContainersActive() then return end
+    local ok, BC = pcall(require, "BetterContainers/Proximity")
+    if not ok or type(BC) ~= "table" or type(BC.getAggregateSource) ~= "function" then
+        log("Better Containers: Proximity module not found")
+        return
+    end
+    if BC.bridgeWrapped then return end
+
+
+    local getAggregateSource = BC.getAggregateSource
+    BC.getAggregateSource = function(invSelf, inventory, playerObj)
+        if BridgeInventory.isHers(inventory) then return nil end
+        return getAggregateSource(invSelf, inventory, playerObj)
+    end
+    BC.bridgeWrapped = true
+
+
+    local okNested, Nested = pcall(require, "BetterContainers/Nested")
+    if okNested and type(Nested) == "table" and type(Nested.addIgnoredInventoryPredicate) == "function" then
+        Nested.addIgnoredInventoryPredicate("Bridge.StayWithMe", function(_, inventory)
+            return BridgeInventory.isHers(inventory)
+        end)
+    end
+    log("Better Containers wrapped: her containers stay out of proximity")
+end
+
+Events.OnGameStart.Add(function()
+    pcall(BridgeInventory.wrapProximity)
+    pcall(BridgeInventory.wrapBetterContainers)
+end)
 
 
 
